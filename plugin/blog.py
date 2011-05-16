@@ -22,6 +22,7 @@ vimpress_temp_dir = ''
 mw_api = None
 wp_api = None
 marker = ("=========== Meta ============", "=============================", "========== Content ==========")
+list_view_key_map = dict(enter = "<enter>", delete = "<delete>")
 
 tag_string = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
 tag_re = re.compile(tag_string % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_name>\S+)'))
@@ -292,8 +293,9 @@ def blog_new(edit_type = "post"):
 
     if vimpress_view.startswith("list"):
         currentContent = ['']
-        if vim.eval("mapcheck('<enter>')"):
-            vim.command('unmap <buffer> <enter>')
+        for v in list_view_key_map.values():
+            if vim.eval("mapcheck('%s')" % v):
+                vim.command('unmap <buffer> %s' % v)
     else:
         currentContent = vim.current.buffer[:]
 
@@ -311,7 +313,7 @@ def blog_new(edit_type = "post"):
     vim.command('setl textwidth=0')
 
 @__xmlrpc_api_check
-def blog_open(edit_type, post_id):
+def blog_edit(edit_type, post_id):
     """
     Opens a new editing buffer with blog content of specified type and id.
     @params edit_type - either "post" or "page"
@@ -359,8 +361,9 @@ def blog_open(edit_type, post_id):
     vim.command('setl nomodified')
     vim.command('setl textwidth=0')
 
-    if vim.eval("mapcheck('<enter>')"):
-        vim.command('unmap <buffer> <enter>')
+    for v in list_view_key_map.values():
+        if vim.eval("mapcheck('%s')" % v):
+            vim.command('unmap <buffer> %s' % v)
 
 @__xmlrpc_api_check
 def blog_delete(edit_type, post_id):
@@ -379,22 +382,33 @@ def blog_delete(edit_type, post_id):
         deleted = wp_api.deletePage('', blog_username, blog_password, post_id)
 
     if deleted:
-        sys.stdout.write("Deleted " + edit_type + " " + str(post_id))
+        sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
     else:
-        sys.stdout.write("There was a problem deleting the %s." % edit_type)
+        sys.stdout.write("There was a problem deleting the %s.\n" % edit_type)
 
-    if vimpress_view in ("list", "list_page"):
+    if vimpress_view.startswith("list"):
         blog_list(edit_type)
 
-def blog_list_edit(action):
+def blog_list_on_key_press(action):
     """
     Calls blog open on the current line of a listing buffer.
     """
+    global vimpress_view
     if action.lower() not in ("open", "delete"):
-        raise VimPressException("Invalid option: " % action)
+        raise VimPressException("Invalid option: %s" % action)
+
     global vimpress_view
     row = vim.current.window.cursor[0]
-    id = vim.current.buffer[row - 1].split()[0]
+    line = vim.current.buffer[row - 1]
+    id = line.split()[0]
+    title = line[len(id) + 2:]
+
+    if action.lower() == "delete":
+        confirm = python_input("Confirm Delete [%s]: %s? [yes/NO]" % (id,title))
+        if confirm != 'yes':
+            sys.stdout.write("Delete Cancled.\n")
+            return
+
     vim.command("setl modifiable")
     del vim.current.buffer[:]
     vim.command("setl nomodified")
@@ -407,10 +421,9 @@ def blog_list_edit(action):
         raise VimPressException("Command only available in list view.")
 
     if action == "open":
-        blog_open(edit_type, int(id))
+        blog_edit(edit_type, int(id))
     elif action == "delete":
         blog_delete(edit_type, int(id))
-        blog_list(edit_type)
 
 @__exception_check
 @__vim_encoding_check
@@ -444,8 +457,9 @@ def blog_list(edit_type = "post", count = "30"):
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
     vim.current.window.cursor = (2, 0)
-    vim.command("map <buffer> <enter> :py blog_list_edit('open')<cr>")
-    vim.command("map <buffer> D       :py blog_list_edit('delete')<cr>")
+    vim.command("map <buffer> %(enter)s :py blog_list_on_key_press('open')<cr>" % list_view_key_map)
+    vim.command("map <buffer> %(delete)s :py blog_list_on_key_press('delete')<cr>" % list_view_key_map)
+    sys.stdout.write("Press <Enter> to edit. <Delete> to delete.\n")
 
 @__exception_check
 @__vim_encoding_check
@@ -567,7 +581,7 @@ def blog_guess_open(what):
                 pass
 
     if post_id != '':
-        blog_open("post", post_id)
+        blog_edit("post", post_id)
     else:
         raise VimPressException("Failed to get post/page id from the supplied parameter '%s'." % what)
 
@@ -609,6 +623,13 @@ def secret_input(message = "input"):
     vim.command("let user_input = inputsecret('" + message + ": ')")
     vim.command("call inputrestore()")
     return vim.eval("user_input")
+
+@__vim_encoding_check
+def python_input(message = 'input'):
+  vim.command('call inputsave()')
+  vim.command("let user_input = input('" + message + ": ')")
+  vim.command('call inputrestore()')
+  return vim.eval('user_input')
 
 @__exception_check
 @__vim_encoding_check

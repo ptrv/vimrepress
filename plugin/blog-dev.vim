@@ -83,8 +83,7 @@ fun! Completable(findstart, base)
   endif
 endfun
 
-command! -nargs=+ -complete=custom,CompEditType BlogList exec('py blog_list(<f-args>)')
-command! -nargs=+ -complete=custom,CompEditType BlogDelete exec('py blog_delete(<f-args>)')
+command! -nargs=* -complete=custom,CompEditType BlogList exec('py blog_list(<f-args>)')
 command! -nargs=? -complete=custom,CompEditType BlogNew exec('py blog_new(<f-args>)')
 command! -nargs=? -complete=custom,CompSave BlogSave exec('py blog_save(<f-args>)')
 command! -nargs=? -complete=custom,CompPrev BlogPreview exec('py blog_preview(<f-args>)')
