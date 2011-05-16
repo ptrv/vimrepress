@@ -1,3 +1,4 @@
+"#######################################################################
 " Copyright (C) 2007 Adrien Friggeri.
 "
 " This program is free software; you can redistribute it and/or modify
@@ -18,7 +19,8 @@
 "               Pigeond <http://pigeond.net/blog/>
 "               Preston M.[BOYPT] <pentie@gmail.com>
 "               Justin Sattery <justin.slattery@fzysqr.com>
-"               Lenin Lee <http://sinolog.it/>
+"               Lenin Lee <lenin.lee@gmail.com>
+"               Conner McDaniel <connermcd@gmail.com>
 "
 " URL:		http://www.friggeri.net/projets/vimblog/
 "           http://pigeond.net/blog/2009/05/07/vimpress-again/
@@ -30,16 +32,15 @@
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
 "
-" Version:	2.0.0beta
+" Version:	2.0.0beta2
 "
-" Configure: Add blog configure into your .vimrc
+" Configure: Add blog configure into your .vimrc (password optional)
 "
 " let VIMPRESS=[{'username':'user',
 "               \'password':'pass',
 "               \'blog_url':'http://your-first-blog.com/'
 "               \},
 "               \{'username':'user',
-"               \'password':'pass',
 "               \'blog_url':'http://your-second-blog.com/'
 "               \}]
 "
@@ -61,13 +62,35 @@ function! CompEditType(ArgLead, CmdLine, CursorPos)
   return "post\npage\n"
 endfunction
 
-command! -nargs=? -complete=custom,CompEditType BlogNew exec('py blog_new_post(<f-args>)')
-command! -nargs=* -complete=custom,CompEditType BlogList exec('py blog_list_posts(<f-args>)')
-command! -nargs=? -complete=custom,CompSave BlogSave exec('py blog_send_post(<f-args>)')
-command! -nargs=1 BlogOpen exec('py blog_guess_open(<f-args>)')
-command! -nargs=1 -complete=file BlogUpload exec('py blog_upload_media(<f-args>)')
-command! -nargs=? BlogCode exec('py blog_append_code(<f-args>)')
+fun! Completable(findstart, base)
+  if a:findstart
+    " locate the start of the word
+    let line = getline('.')
+    let start = col('.') - 1
+    while start > 0 && line[start - 1] =~ '\a'
+      let start -= 1
+    endwhile
+    return start
+  else
+    " find matching items
+    let res = []
+    for m in split(s:completable,"|")
+      if m =~ '^' . a:base
+        call add(res, m)
+      endif
+    endfor
+    return res
+  endif
+endfun
+
+command! -nargs=+ -complete=custom,CompEditType BlogList exec('py blog_list(<f-args>)')
+command! -nargs=+ -complete=custom,CompEditType BlogDelete exec('py blog_delete(<f-args>)')
+command! -nargs=? -complete=custom,CompEditType BlogNew exec('py blog_new(<f-args>)')
+command! -nargs=? -complete=custom,CompSave BlogSave exec('py blog_save(<f-args>)')
 command! -nargs=? -complete=custom,CompPrev BlogPreview exec('py blog_preview(<f-args>)')
-command! -nargs=0 BlogSwitch exec('py blog_config_switch()')
+command! -nargs=1 -complete=file BlogUpload exec('py blog_upload_media(<f-args>)')
+command! -nargs=1 BlogOpen exec('py blog_guess_open(<f-args>)')
+command! -nargs=? BlogSwitch exec('py blog_config_switch(<f-args>)')
+command! -nargs=? BlogCode exec('py blog_append_code(<f-args>)')
 
 python import os; execfile(os.path.expanduser('~/.vim/plugin/blog.py'))
