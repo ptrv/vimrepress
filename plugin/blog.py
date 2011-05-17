@@ -6,12 +6,12 @@ except ImportError:
     try:
         import markdown2 as markdown
     except ImportError:
-        class fake_markdown(object):
+        class markdown_stub(object):
             def markdown(self, n):
                 raise VimPressException("The package python-markdown is required and is either not present or not properly installed.")
-        markdown = fake_markdown()
+        markdown = markdown_stub()
 
-image_template = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" width="100%%" /></a>'
+image_template = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" /></a>'
 blog_username = None
 blog_password = None
 blog_url = None
@@ -401,12 +401,14 @@ def blog_list_on_key_press(action):
     row = vim.current.window.cursor[0]
     line = vim.current.buffer[row - 1]
     id = line.split()[0]
-    title = line[len(id) + 2:]
+    title = line[len(id):].strip()
+    if len(title) > 30:
+        title = title[:30] + ' ...'
 
     if action.lower() == "delete":
-        confirm = python_input("Confirm Delete [%s]: %s? [yes/NO]" % (id,title))
+        confirm = vim_input("Confirm Delete [%s]: %s? [yes/NO]" % (id,title))
         if confirm != 'yes':
-            sys.stdout.write("Delete Cancled.\n")
+            sys.stdout.write("Delete Aborted.\n")
             return
 
     vim.command("setl modifiable")
@@ -476,15 +478,13 @@ def blog_upload_media(file_path):
 
     name = os.path.basename(file_path)
     filetype = mimetypes.guess_type(file_path)[0]
-    f = open(file_path, 'r')
-    bits = xmlrpclib.Binary(f.read())
-    f.close()
+    with open(file_path) as f:
+        bits = xmlrpclib.Binary(f.read())
 
-    result = mw_api.newMediaObject(1, blog_username, blog_password, 
+    result = mw_api.newMediaObject('', blog_username, blog_password, 
             dict(name = name, type = filetype, bits = bits))
 
     ran = vim.current.range
-
     if filetype.startswith("image"):
         img = image_template % result
         ran.append(img)
@@ -539,6 +539,8 @@ def blog_preview(pub = "local"):
         webbrowser.open(prev_url)
         if pub == "draft":
             sys.stdout.write("\nYou have to login in the browser to preview the post when save as draft.")
+    else:
+        raise VimPressException("Invalid option: %s " % pub)
 
 
 @__exception_check
@@ -562,7 +564,7 @@ def blog_guess_open(what):
                     headers = urllib.urlopen(what).headers.headers
                     for link in headers:
                         if link.startswith("Link:"):
-                            post_id = re.sub(r"Link: <\S+?p=(\d+)>.+\n", r"\1", link)
+                            post_id = re.search(r"<\S+?p=(\d+)>", link).group(1)
 
                     # fail, just give up
                     if post_id == '':
@@ -598,7 +600,7 @@ def blog_update_config():
         blog_url = config['blog_url']
         blog_password = config.get('password', '')
         if blog_password == '':
-           blog_password = secret_input("Enter password for %s" % blog_url)
+           blog_password = vim_input("Enter password for %s" % blog_url, True)
         mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).metaWeblog
         wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).wp
 
@@ -618,18 +620,11 @@ def blog_update_config():
         raise VimPressException("Configuration error: %s" % e)
 
 @__vim_encoding_check
-def secret_input(message = "input"):
-    vim.command("call inputsave()")
-    vim.command("let user_input = inputsecret('" + message + ": ')")
-    vim.command("call inputrestore()")
-    return vim.eval("user_input")
-
-@__vim_encoding_check
-def python_input(message = 'input'):
-  vim.command('call inputsave()')
-  vim.command("let user_input = input('" + message + ": ')")
-  vim.command('call inputrestore()')
-  return vim.eval('user_input')
+def vim_input(message = 'input', secret = False):
+    vim.command('call inputsave()')
+    vim.command("let user_input = %s('%s :')" % (("inputsecret" if secret else "input"), message))
+    vim.command('call inputrestore()')
+    return vim.eval('user_input')
 
 @__exception_check
 @__vim_encoding_check
@@ -667,13 +662,7 @@ def html_preview(text_html, meta):
 <html><head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <title>Vimpress Local Preview: %(title)s</title>
-<style type="text/css">
-ul, li { margin: 1em; }
-:link,:visited { text-decoration:none }
-h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; }
-a img,:link img,:visited img { border:none }
-address { font-style:normal }
-body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
+<style type="text/css"> ul, li { margin: 1em; } :link,:visited { text-decoration:none } h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; } a img,:link img,:visited img { border:none } body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
 </style>
 </meta>
 </head>
