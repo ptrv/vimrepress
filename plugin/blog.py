@@ -301,12 +301,8 @@ def blog_new(edit_type = "post"):
 
     blog_wise_open_view()
     vimpress_view = 'edit'
-
-    meta_dict = dict()
-
-    meta_dict["edittype"] = edit_type
+    meta_dict = dict(edittype = edit_type)
     blog_fill_meta_area(meta_dict)
-
     vim.current.buffer.append(currentContent)
     vim.current.window.cursor = (1, 0)
     vim.command('setl nomodified')
@@ -389,6 +385,7 @@ def blog_delete(edit_type, post_id):
     if vimpress_view.startswith("list"):
         blog_list(edit_type)
 
+@__exception_check
 def blog_list_on_key_press(action):
     """
     Calls blog open on the current line of a listing buffer.
@@ -402,6 +399,12 @@ def blog_list_on_key_press(action):
     line = vim.current.buffer[row - 1]
     id = line.split()[0]
     title = line[len(id):].strip()
+
+    try:
+        int(id)
+    except ValueError:
+        raise VimPressException("Move cursor to a post/page line and press KEY.")
+
     if len(title) > 30:
         title = title[:30] + ' ...'
 
@@ -459,9 +462,9 @@ def blog_list(edit_type = "post", count = "30"):
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
     vim.current.window.cursor = (2, 0)
-    vim.command("map <buffer> %(enter)s :py blog_list_on_key_press('open')<cr>" % list_view_key_map)
-    vim.command("map <buffer> %(delete)s :py blog_list_on_key_press('delete')<cr>" % list_view_key_map)
-    sys.stdout.write("Press <Enter> to edit. <Delete> to delete.\n")
+    vim.command("map <silent> <buffer> %(enter)s :py blog_list_on_key_press('open')<cr>" % list_view_key_map)
+    vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete')<cr>" % list_view_key_map)
+    sys.stdout.write("Press <Enter> to edit. <Delete> to move to trash.\n")
 
 @__exception_check
 @__vim_encoding_check
