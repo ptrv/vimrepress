@@ -552,8 +552,15 @@ def blog_guess_open(what):
     Tries several methods to get the post id from different user inputs, such as args, url, postid etc.
     """ 
     post_id = ''
+    blog_index = -1
     if type(what) is str:
-        if what.startswith(blog_url):
+
+        for i, p in enumerate(vim.eval("VIMPRESS")):
+            if what.startswith(p["blog_url"]):
+                blog_index = i
+
+        # User input a url contained in the profiles
+        if blog_index != -1:
             guess_id = re.search(r"\S+?p=(\d+)$", what)
 
             # permantlinks
@@ -571,7 +578,7 @@ def blog_guess_open(what):
 
                     # fail, just give up
                     if post_id == '':
-                        raise VimPressException("Failed to get post/page id from the supplied parameter '%s'." % what)
+                        raise VimPressException("Failed to get post/page id from '%s'." % what)
                 else:
                     post_id = guess_id.group(1)
 
@@ -579,16 +586,20 @@ def blog_guess_open(what):
             else:
                 post_id = guess_id.group(1)
 
+        # Uesr input something not a usabe url, try numberic
         else:
             try:
                 post_id = str(int(what))
             except ValueError:
                 pass
 
+    # detected something
     if post_id != '':
+        if blog_index != -1 and blog_index != blog_conf_index:
+            blog_config_switch(blog_index)
         blog_edit("post", post_id)
     else:
-        raise VimPressException("Failed to get post/page id from the supplied parameter '%s'." % what)
+        raise VimPressException("Failed to get post/page id from '%s'." % what)
 
 
 @__exception_check
