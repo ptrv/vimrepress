@@ -634,13 +634,19 @@ def blog_config_switch(conf_index = -1):
     Switches the blog to the next index of the configuration array.
     """
     global blog_conf_index
+    try:
+        conf_index = int(conf_index)
+    except ValueError:
+        raise VimPressException("Invalid Index: %s" % conf_index)
+
+    conf = vim.eval("VIMPRESS")
     if conf_index == -1:
         blog_conf_index += 1
-        try:
-            vim.eval("VIMPRESS")[blog_conf_index]
-        except IndexError:
+        if blog_conf_index >= len(conf):
             blog_conf_index = 0
     else:
+        if conf_index >= len(conf):
+            raise VimPressException("Invalid Index: %d" % conf_index)
         blog_conf_index = conf_index
 
     blog_update_config()
