@@ -605,14 +605,12 @@ def blog_update_config():
         wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).wp
 
         # Setting tags and categories for completefunc
-        s = ""
-        l = mw_api.getCategories('', blog_username, blog_password)
-        for i in l:
-          s = s + (i["description"].encode("utf-8"))+"|"
-        l = wp_api.getTags('', blog_username, blog_password)
-        for i in l:
-          s = s + (i["name"].encode("utf-8"))+"|"
-        vim.command('let s:completable = "'+s+'"')
+        terms = []
+        terms.extend([i["description"].encode("utf-8") 
+            for i in mw_api.getCategories('', blog_username, blog_password)])
+        #terms.extend([i["name"].encode("utf-8") for i in wp_api.getTags('', blog_username, blog_password)])
+        
+        vim.command('let s:completable = "%s"' % '|'.join(terms))
 
     except vim.error:
         raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
