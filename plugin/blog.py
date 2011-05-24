@@ -608,6 +608,7 @@ def blog_update_config():
     Updates the script's configuration variables.
     """
     global blog_username, blog_password, blog_url, mw_api, wp_api
+    sys.stdout.write("Vimpress connecting to %s \n" % blog_url)
     try:
         config = vim.eval("VIMPRESS")[blog_conf_index]
         blog_username = config['username']
@@ -622,8 +623,8 @@ def blog_update_config():
         terms = []
         terms.extend([i["description"].encode("utf-8") 
             for i in mw_api.getCategories('', blog_username, blog_password)])
+        # adding tags may make the menu too much items to choose.
         #terms.extend([i["name"].encode("utf-8") for i in wp_api.getTags('', blog_username, blog_password)])
-        
         vim.command('let s:completable = "%s"' % '|'.join(terms))
 
     except vim.error:
