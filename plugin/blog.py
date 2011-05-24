@@ -608,11 +608,11 @@ def blog_update_config():
     Updates the script's configuration variables.
     """
     global blog_username, blog_password, blog_url, mw_api, wp_api
-    sys.stdout.write("Vimpress connecting to %s \n" % blog_url)
     try:
         config = vim.eval("VIMPRESS")[blog_conf_index]
         blog_username = config['username']
         blog_url = config['blog_url']
+        sys.stdout.write("Vimpress connecting to %s \n" % blog_url)
         blog_password = config.get('password', '')
         if blog_password == '':
            blog_password = vim_input("Enter password for %s" % blog_url, True)
