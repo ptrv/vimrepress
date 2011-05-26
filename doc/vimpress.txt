@@ -52,8 +52,10 @@ Vimpress Commands (parameters in square brackets are optional):
 <   Lists a specified number of blog posts or pages for the current blog
     starting the with most recent.  In this view, you can press <enter> 
     to open a post for edit, or press <delete> to move a post to trash.
+    The Delete function doesn't actually remove your post, but move to 
+    the trash.
     [<edit_type>] - either post or page, [Default post].
-    [<count>]   - number to display (only for posts)
+    [<count>]  - number to display (only for posts, Default 30)
 >
     :BlogNew [<edit_type>]
 <   Creates a new page editing window from the current buffer.
@@ -61,7 +63,7 @@ Vimpress Commands (parameters in square brackets are optional):
 >
     :BlogSave [<save_type>]
 <   Saves the current editing window.
-    [<save_type>] - either post or publish. [Default:publish] 
+    [<save_type>] - either post or publish. [Default:draft] 
 >
     :BlogPreview [<save_type>]
 <   If set to local, converts the editing window to HTML and displays it 
@@ -88,6 +90,13 @@ Vimpress Commands (parameters in square brackets are optional):
 <   Appends a pre tag to the end of the current buffer of a specified
     code language. (i.e. python)
      [<language>] - the coding language
+
+*TIPS*
+
+|Categories| When you're writing a new post, and you want to fill the "Cats"
+line in the meta field, press <Ctrl-xCtrl-u> in INSERT mode, a menu will
+show up with all your categories names in your blog. Completion is supported.
+
 
 
 *EXAMPLES*
