@@ -94,8 +94,10 @@ Vimpress Commands (parameters in square brackets are optional):
 *TIPS*
 
 |Categories| When you're writing a new post, and you want to fill the "Cats"
-line in the meta field, press <Ctrl-xCtrl-u> in INSERT mode, a menu will
+line in the meta field, press <Ctrl-x Ctrl-u> in INSERT mode, a menu will
 show up with all your categories names in your blog. Completion is supported.
+
+|Recovery| If you have a slow connection to your blog, there's a chance that gvim will got hanged during your posting the article, just wait patiently. If still vim crashed with fail posting your article (never happened here), don't  worried, vim had a inteligent recovery system, reopen vim and strike |:recovery| command, your article should appear. Type |:help recovery| for more info.
 
 
 
