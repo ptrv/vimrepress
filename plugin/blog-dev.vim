@@ -32,7 +32,7 @@
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
 "
-" Version:	2.1.0beta
+" Version:	2.1.0
 "
 " Configure: Add blog configure into your .vimrc (password optional)
 "
