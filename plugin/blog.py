@@ -501,12 +501,12 @@ def blog_append_code(code_type = ""):
     if vimpress_view != 'edit':
         raise VimPressException("Command not available at list view.")
     html = \
-"""<pre escaped="True"%s>
+"""<pre %s>
 </pre>"""
     if code_type != "":
         args = ' lang="%s" line="1"' % code_type
     else:
-        args = ''
+        args = ' lang="text"'
 
     row, col = vim.current.window.cursor 
     code_block = (html % args).split('\n')
