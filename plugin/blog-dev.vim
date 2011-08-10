@@ -17,10 +17,11 @@
 " 
 " Maintainer:	Adrien Friggeri <adrien@friggeri.net>
 "               Pigeond <http://pigeond.net/blog/>
-"               Preston M.[BOYPT] <pentie@gmail.com>
 "               Justin Sattery <justin.slattery@fzysqr.com>
 "               Lenin Lee <lenin.lee@gmail.com>
 "               Conner McDaniel <connermcd@gmail.com>
+"
+"     Forked:   Preston M.[BOYPT] <pentie@gmail.com>
 "
 " URL:		http://www.friggeri.net/projets/vimblog/
 "           http://pigeond.net/blog/2009/05/07/vimpress-again/
@@ -32,7 +33,7 @@
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
 "
-" Version:	2.1.0
+" Version:	2.1.2
 "
 " Configure: Add blog configure into your .vimrc (password optional)
 "
