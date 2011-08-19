@@ -15,6 +15,7 @@ except ImportError:
 # Golbal Variables
 #################################################
 
+DEFAULT_LIST_COUNT = "15"
 image_template = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" /></a>'
 blog_username = None
 blog_password = None
@@ -100,7 +101,8 @@ def view_switch(view = "", assert_view = "", reset = False, command = ""):
                     else:
                         kw["currentContent"] = vim.current.buffer[:]
                 elif command == "blog_switch":
-                    kw["refresh_list"] = True
+                    if vimpress_view == "list":
+                        kw["refresh_list"] = True
 
             if reset:
                 POSTS_MAX = -1
@@ -575,18 +577,16 @@ def blog_list_on_key_press(action, edit_type):
         blog_delete(edit_type, int(id))
 
 
-def append_blog_list(edit_type, count = "15"):
+def append_blog_list(edit_type, count = DEFAULT_LIST_COUNT):
     global POSTS_MAX, POSTS_TITLES
     if edit_type.lower() == "post":
-
         current_posts = len(vim.current.buffer) - 1
         retrive_count = int(count) + current_posts
 
-        if POSTS_MAX == -1:
-            POSTS_TITLES = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
-            len_allposts = len(POSTS_TITLES)
-            if len_allposts < current_posts + int(count):
-                POSTS_MAX = len_allposts
+        POSTS_TITLES = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
+        len_allposts = len(POSTS_TITLES)
+        if len_allposts < current_posts + int(count):
+            POSTS_MAX = len_allposts
 
         vim.current.buffer.append(\
                 [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in POSTS_TITLES[current_posts:]])
@@ -599,11 +599,10 @@ def append_blog_list(edit_type, count = "15"):
 @vim_encoding_check
 @xmlrpc_api_check
 @view_switch(view = "list")
-def blog_list(edit_type = "post", count = "20"):
+def blog_list(edit_type = "post"):
     """
     Creates a listing buffer of specified type.
     @params edit_type - either "post(s)" or "page(s)"
-            count     - number to show (only for posts)
     """
     blog_wise_open_view()
     vim.current.buffer[0] = "\"====== List of %ss in %s =========" % (edit_type.capitalize(), blog_url)
@@ -611,7 +610,7 @@ def blog_list(edit_type = "post", count = "20"):
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
-    append_blog_list(edit_type, count)
+    append_blog_list(edit_type, DEFAULT_LIST_COUNT)
 
     vim.current.buffer.append(marker[3])
 

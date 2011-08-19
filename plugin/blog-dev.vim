@@ -33,7 +33,7 @@
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
 "
-" Version:	2.1.2
+" Version:	2.2.0
 "
 " Configure: Add blog configure into your .vimrc (password optional)
 "
@@ -84,7 +84,7 @@ fun! Completable(findstart, base)
   endif
 endfun
 
-command! -nargs=* -complete=custom,CompEditType BlogList exec('py blog_list(<f-args>)')
+command! -nargs=? -complete=custom,CompEditType BlogList exec('py blog_list(<f-args>)')
 command! -nargs=? -complete=custom,CompEditType BlogNew exec('py blog_new(<f-args>)')
 command! -nargs=? -complete=custom,CompSave BlogSave exec('py blog_save(<f-args>)')
 command! -nargs=? -complete=custom,CompPrev BlogPreview exec('py blog_preview(<f-args>)')
