@@ -27,7 +27,8 @@ mw_api = None
 wp_api = None
 marker = ("=========== Meta ============", 
         "=============================", 
-        "========== Content ==========")
+        "========== Content ==========",
+        '"====== Press Here for More ======')
 list_view_key_map = dict(enter = "<enter>", delete = "<delete>")
 
 tag_string = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
@@ -35,6 +36,8 @@ tag_re = re.compile(tag_string % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_
 
 default_meta = dict(strid = "", title = "", slug = "", 
         cats = "", tags = "", editformat = "Markdown", edittype = "post", textattach = '')
+
+POSTS_MAX = -1
 
 #################################################
 # Helper Classes
@@ -503,10 +506,17 @@ def blog_list_on_key_press(action):
     Calls blog open on the current line of a listing buffer.
     """
     global vimpress_view
+
     if action.lower() not in ("open", "delete"):
         raise VimPressException("Invalid option: %s" % action)
 
-    global vimpress_view
+    if vimpress_view == "list_page":
+        edit_type = "page"
+    elif vimpress_view == "list_post":
+        edit_type = "post"
+    else:
+        raise VimPressException("Command only available in list view.")
+
     row = vim.current.window.cursor[0]
     line = vim.current.buffer[row - 1]
     id = line.split()[0]
@@ -515,7 +525,18 @@ def blog_list_on_key_press(action):
     try:
         int(id)
     except ValueError:
-        raise VimPressException("Move cursor to a post/page line and press KEY.")
+        if line.find("More") != -1:
+            vim.command("setl modifiable")
+            del vim.current.buffer[len(vim.current.buffer) - 1:]
+            append_blog_list(edit_type)
+            vim.current.buffer.append(marker[3])
+            vim.command("setl nomodified")
+            vim.command("setl nomodifiable")
+            return
+
+        else:
+            raise VimPressException("Move cursor to a post/page line and press KEY.")
+
 
     if len(title) > 30:
         title = title[:30] + ' ...'
@@ -530,22 +551,43 @@ def blog_list_on_key_press(action):
     del vim.current.buffer[:]
     vim.command("setl nomodified")
 
-    if vimpress_view == "list_page":
-        edit_type = "page"
-    elif vimpress_view == "list_post":
-        edit_type = "post"
-    else:
-        raise VimPressException("Command only available in list view.")
 
     if action == "open":
         blog_edit(edit_type, int(id))
     elif action == "delete":
         blog_delete(edit_type, int(id))
 
+
+def append_blog_list(edit_type, count = "20"):
+    global vimpress_view, POSTS_MAX
+    if edit_type.lower() in ("post", "posts"):
+        vimpress_view = 'list_post'
+
+        if POSTS_MAX != -1:
+            print "No more posts."
+            return
+        current_posts = len(vim.current.buffer) - 1
+        retrive_count = int(count) + current_posts
+        allposts = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
+        len_allposts = len(allposts)
+
+        if len_allposts < current_posts + int(count):
+            POSTS_MAX = len_allposts
+
+        begin_pos = current_posts
+
+        vim.current.buffer.append(\
+                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in allposts[begin_pos:]])
+    else:
+        vimpress_view = 'list_page'
+        pages = wp_api.getPageList('', blog_username, blog_password)
+        vim.current.buffer.append(\
+            [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
+
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
-def blog_list(edit_type = "post", count = "30"):
+def blog_list(edit_type = "post", count = "20"):
     """
     Creates a listing buffer of specified type.
     @params edit_type - either "post(s)" or "page(s)"
@@ -560,16 +602,9 @@ def blog_list(edit_type = "post", count = "30"):
     if edit_type.lower() not in ("post", "posts", "page", "pages"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
-    if edit_type.lower() in ("post", "posts"):
-        vimpress_view = 'list_post'
-        allposts = mw_api.getRecentPosts('',blog_username, blog_password, int(count))
-        vim.current.buffer.append(\
-            [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in allposts])
-    else:
-        vimpress_view = 'list_page'
-        pages = wp_api.getPageList('', blog_username, blog_password)
-        vim.current.buffer.append(\
-            [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
+    append_blog_list(edit_type, count)
+
+    vim.current.buffer.append(marker[3])
 
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
