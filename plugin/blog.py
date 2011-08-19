@@ -38,6 +38,7 @@ default_meta = dict(strid = "", title = "", slug = "",
         cats = "", tags = "", editformat = "Markdown", edittype = "post", textattach = '')
 
 POSTS_MAX = -1
+POSTS_TITLES = []
 
 #################################################
 # Helper Classes
@@ -83,6 +84,42 @@ def vim_encoding_check(func):
                 vim.command('setl nomodified')
         return func(*args, **kw)
     return __check
+
+def view_switch(view = "", assert_view = "", reset = False, command = ""):
+    def switch(func):
+        def __run(*args, **kw):
+            global vimpress_view, POSTS_MAX
+            if assert_view != '':
+                if vimpress_view != assert_view:
+                    raise VimPressException("Command only available at '%s' view." % assert_view)
+
+            if command != "":
+                if command == "blog_new":
+                    if vimpress_view == "list":
+                        kw["currentContent"] = ['']
+                    else:
+                        kw["currentContent"] = vim.current.buffer[:]
+                elif command == "blog_switch":
+                    kw["refresh_list"] = True
+
+            if reset:
+                POSTS_MAX = -1
+            if view != '':
+                #Switching view
+                if vimpress_view != view:
+
+                    #from list view
+                    if vimpress_view == "list":
+                        for v in list_view_key_map.values():
+                            if vim.eval("mapcheck('%s')" % v):
+                                vim.command('unmap <buffer> %s' % v)
+
+                    vimpress_view = view
+
+            return func(*args, **kw)
+        return __run
+    return switch
+
 
 def blog_meta_parse():
     """
@@ -305,13 +342,12 @@ def xmlrpc_api_check(func):
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
+@view_switch(assert_view = "edit", reset = True)
 def blog_save(pub = "draft"):
     """
     Saves the current editing buffer.
     @params pub - either "draft" or "publish"
     """
-    if vimpress_view != 'edit':
-        raise VimPressException("Command not available at list view.")
     if pub not in ("publish", "draft"):
         raise VimPressException(":BlogSave draft|publish")
 
@@ -396,26 +432,16 @@ def blog_save(pub = "draft"):
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
-def blog_new(edit_type = "post"):
+@view_switch(view = "edit", command = "blog_new")
+def blog_new(edit_type = "post", currentContent = None):
     """
     Creates a new editing buffer of specified type.
     @params edit_type - either "post" or "page"
     """
-    global vimpress_view
-
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
-    if vimpress_view.startswith("list"):
-        currentContent = ['']
-        for v in list_view_key_map.values():
-            if vim.eval("mapcheck('%s')" % v):
-                vim.command('unmap <buffer> %s' % v)
-    else:
-        currentContent = vim.current.buffer[:]
-
     blog_wise_open_view()
-    vimpress_view = 'edit'
     meta_dict = dict(edittype = edit_type)
     blog_fill_meta_area(meta_dict)
     vim.current.buffer.append(currentContent)
@@ -424,15 +450,13 @@ def blog_new(edit_type = "post"):
     vim.command('setl textwidth=0')
 
 @xmlrpc_api_check
+@view_switch(view = "edit")
 def blog_edit(edit_type, post_id):
     """
     Opens a new editing buffer with blog content of specified type and id.
     @params edit_type - either "post" or "page"
             post_id   - the id of the post or page
     """
-    global vimpress_view
-    vimpress_view = 'edit'
-
     blog_wise_open_view()
 
     if edit_type.lower() not in ("post", "page"):
@@ -477,13 +501,13 @@ def blog_edit(edit_type, post_id):
             vim.command('unmap <buffer> %s' % v)
 
 @xmlrpc_api_check
+@view_switch(assert_view = "list", reset = True, command = "blog_delete")
 def blog_delete(edit_type, post_id):
     """
     Deletes a page or post of specified id.
     @params edit_type - either "page" or "post"
             post_id   - the id of the post or page
     """
-    global vimpress_view
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
@@ -497,25 +521,16 @@ def blog_delete(edit_type, post_id):
     else:
         sys.stdout.write("There was a problem deleting the %s.\n" % edit_type)
 
-    if vimpress_view.startswith("list"):
-        blog_list(edit_type)
+    blog_list(edit_type)
 
 @exception_check
-def blog_list_on_key_press(action):
+@view_switch(assert_view = "list") 
+def blog_list_on_key_press(action, edit_type):
     """
     Calls blog open on the current line of a listing buffer.
     """
-    global vimpress_view
-
     if action.lower() not in ("open", "delete"):
         raise VimPressException("Invalid option: %s" % action)
-
-    if vimpress_view == "list_page":
-        edit_type = "page"
-    elif vimpress_view == "list_post":
-        edit_type = "post"
-    else:
-        raise VimPressException("Command only available in list view.")
 
     row = vim.current.window.cursor[0]
     line = vim.current.buffer[row - 1]
@@ -526,6 +541,9 @@ def blog_list_on_key_press(action):
         int(id)
     except ValueError:
         if line.find("More") != -1:
+            if POSTS_MAX != -1:
+                sys.stdout.write("No more posts.")
+                return
             vim.command("setl modifiable")
             del vim.current.buffer[len(vim.current.buffer) - 1:]
             append_blog_list(edit_type)
@@ -533,9 +551,8 @@ def blog_list_on_key_press(action):
             vim.command("setl nomodified")
             vim.command("setl nomodifiable")
             return
-
         else:
-            raise VimPressException("Move cursor to a post/page line and press KEY.")
+            raise VimPressException("Move cursor to a post/page line and press Enter.")
 
 
     if len(title) > 30:
@@ -558,28 +575,22 @@ def blog_list_on_key_press(action):
         blog_delete(edit_type, int(id))
 
 
-def append_blog_list(edit_type, count = "20"):
-    global vimpress_view, POSTS_MAX
-    if edit_type.lower() in ("post", "posts"):
-        vimpress_view = 'list_post'
+def append_blog_list(edit_type, count = "15"):
+    global POSTS_MAX, POSTS_TITLES
+    if edit_type.lower() == "post":
 
-        if POSTS_MAX != -1:
-            print "No more posts."
-            return
         current_posts = len(vim.current.buffer) - 1
         retrive_count = int(count) + current_posts
-        allposts = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
-        len_allposts = len(allposts)
 
-        if len_allposts < current_posts + int(count):
-            POSTS_MAX = len_allposts
-
-        begin_pos = current_posts
+        if POSTS_MAX == -1:
+            POSTS_TITLES = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
+            len_allposts = len(POSTS_TITLES)
+            if len_allposts < current_posts + int(count):
+                POSTS_MAX = len_allposts
 
         vim.current.buffer.append(\
-                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in allposts[begin_pos:]])
+                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in POSTS_TITLES[current_posts:]])
     else:
-        vimpress_view = 'list_page'
         pages = wp_api.getPageList('', blog_username, blog_password)
         vim.current.buffer.append(\
             [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
@@ -587,19 +598,17 @@ def append_blog_list(edit_type, count = "20"):
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
+@view_switch(view = "list")
 def blog_list(edit_type = "post", count = "20"):
     """
     Creates a listing buffer of specified type.
     @params edit_type - either "post(s)" or "page(s)"
             count     - number to show (only for posts)
     """
-    global vimpress_view
-    vimpress_view = 'list'
-
     blog_wise_open_view()
     vim.current.buffer[0] = "\"====== List of %ss in %s =========" % (edit_type.capitalize(), blog_url)
 
-    if edit_type.lower() not in ("post", "posts", "page", "pages"):
+    if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
     append_blog_list(edit_type, count)
@@ -609,20 +618,19 @@ def blog_list(edit_type = "post", count = "20"):
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
     vim.current.window.cursor = (2, 0)
-    vim.command("map <silent> <buffer> %(enter)s :py blog_list_on_key_press('open')<cr>" % list_view_key_map)
-    vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete')<cr>" % list_view_key_map)
+    vim.command("map <silent> <buffer> %(enter)s :py blog_list_on_key_press('open', '%%s')<cr>" % list_view_key_map % edit_type)
+    vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete', '%%s')<cr>" % list_view_key_map % edit_type)
     sys.stdout.write("Press <Enter> to edit. <Delete> to move to trash.\n")
 
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
+@view_switch(assert_view = "edit")
 def blog_upload_media(file_path):
     """
     Uploads a file to the blog.
     @params file_path - the file's path
     """
-    if vimpress_view != 'edit':
-        raise VimPressException("Command not available at list view.")
     if not os.path.exists(file_path):
         raise VimPressException("File does not exist: %s" % file_path)
 
@@ -644,24 +652,24 @@ def blog_upload_media(file_path):
 
 @exception_check
 @vim_encoding_check
+@view_switch(assert_view = "edit")
 def blog_append_code(code_type = ""):
-    if vimpress_view != 'edit':
-        raise VimPressException("Command not available at list view.")
     html = \
-"""<pre %s>
+"""<pre lang="%s"%s>
 </pre>"""
-    if code_type != "":
-        args = 'lang="%s" line="1"' % code_type
+    if code_type == "":
+        code_type = ("text", "")
     else:
-        args = 'lang="text"'
-
+        code_type = (code_type, ' line="1"')
+    html = html % code_type
     row, col = vim.current.window.cursor 
-    code_block = (html % args).split('\n')
+    code_block = html.split('\n')
     vim.current.range.append(code_block)
     vim.current.window.cursor = (row + len(code_block), 0)
 
 @exception_check
 @vim_encoding_check
+@view_switch(assert_view = "edit")
 def blog_preview(pub = "local"):
     """
     Opens a browser window displaying the content.
@@ -669,8 +677,6 @@ def blog_preview(pub = "local"):
                   If "draft", the content is saved as a draft and previewed remotely.
                   If "publish", the content is published and displayed remotely.
     """
-    if vimpress_view != 'edit':
-        raise VimPressException("Command not available at list view.")
     meta = blog_meta_parse()
     rawtext = '\n'.join(vim.current.buffer[meta["post_begin"]:])
 
@@ -751,7 +757,8 @@ def blog_guess_open(what):
 
 @exception_check
 @vim_encoding_check
-def blog_config_switch(conf_index = -1):
+@view_switch(reset = True, command = "blog_switch")
+def blog_config_switch(conf_index = -1, refresh_list = False):
     """
     Switches the blog to the next index of the configuration array.
     """
@@ -772,7 +779,7 @@ def blog_config_switch(conf_index = -1):
         blog_conf_index = conf_index
 
     blog_update_config()
-    if vimpress_view.startswith('list'):
+    if refresh_list:
         blog_list()
     sys.stdout.write("Vimpress switched to %s" % blog_url)
 
