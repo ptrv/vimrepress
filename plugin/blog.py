@@ -11,6 +11,10 @@ except ImportError:
                 raise VimPressException("The package python-markdown is required and is either not present or not properly installed.")
         markdown = markdown_stub()
 
+#################################################
+# Golbal Variables
+#################################################
+
 image_template = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" /></a>'
 blog_username = None
 blog_password = None
@@ -21,7 +25,9 @@ vimpress_temp_dir = ''
 
 mw_api = None
 wp_api = None
-marker = ("=========== Meta ============", "=============================", "========== Content ==========")
+marker = ("=========== Meta ============", 
+        "=============================", 
+        "========== Content ==========")
 list_view_key_map = dict(enter = "<enter>", delete = "<delete>")
 
 tag_string = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
@@ -30,11 +36,50 @@ tag_re = re.compile(tag_string % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_
 default_meta = dict(strid = "", title = "", slug = "", 
         cats = "", tags = "", editformat = "Markdown", edittype = "post", textattach = '')
 
+#################################################
+# Helper Classes
+#################################################
+
 class VimPressException(Exception):
     pass
 
 class VimPressFailedGetMkd(VimPressException):
     pass
+
+#################################################
+# Helper Functions
+#################################################
+
+def exception_check(func):
+    def __check(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except VimPressException, e:
+            sys.stderr.write(str(e))
+        except xmlrpclib.Fault, e:
+            sys.stderr.write("xmlrpc error: %s" % e.faultString.encode("utf-8"))
+        except xmlrpclib.ProtocolError, e:
+            sys.stderr.write("xmlrpc error: %s %s" % (e.url, e.errmsg))
+        except IOError, e:
+            sys.stderr.write("network error: %s" % e)
+
+    return __check
+
+def vim_encoding_check(func):
+    def __check(*args, **kw):
+        orig_enc = vim.eval("&encoding") 
+        if orig_enc != "utf-8":
+            modified = vim.eval("&modified")
+            buf_list = '\n'.join(vim.current.buffer).decode(orig_enc).encode('utf-8').split('\n')
+            del vim.current.buffer[:]
+            vim.command("setl encoding=utf-8")
+            vim.current.buffer[0] = buf_list[0]
+            if len(buf_list) > 1:
+                vim.current.buffer.append(buf_list[1:])
+            if modified == '0':
+                vim.command('setl nomodified')
+        return func(*args, **kw)
+    return __check
 
 def blog_meta_parse():
     """
@@ -124,7 +169,6 @@ def blog_get_mkd_attachment(post):
     @params post - the content of a post
     @returns a dictionary with the attachment's content and URL
     """
-
     attach = dict()
     try:
         lead = post.rindex("<!-- ")
@@ -139,6 +183,51 @@ def blog_get_mkd_attachment(post):
         raise VimPressFailedGetMkd("The attachment URL was found but was unable to be read.")
 
     return attach
+
+@exception_check
+def blog_update_config():
+    """
+    Updates the script's configuration variables.
+    """
+    global blog_username, blog_password, blog_url, mw_api, wp_api
+    try:
+        config = vim.eval("VIMPRESS")[blog_conf_index]
+        blog_username = config['username']
+        blog_url = config['blog_url']
+        sys.stdout.write("Connecting to %s \n" % blog_url)
+        blog_password = config.get('password', '')
+        if blog_password == '':
+           blog_password = vim_input("Enter password for %s" % blog_url, True)
+        mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).metaWeblog
+        wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).wp
+
+        # Setting tags and categories for completefunc
+        terms = []
+        terms.extend([i["description"].encode("utf-8") 
+            for i in mw_api.getCategories('', blog_username, blog_password)])
+        # adding tags may make the menu too much items to choose.
+        #terms.extend([i["name"].encode("utf-8") for i in wp_api.getTags('', blog_username, blog_password)])
+        vim.command('let s:completable = "%s"' % '|'.join(terms))
+
+    except vim.error:
+        raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
+    except KeyError, e:
+        raise VimPressException("Configuration error: %s" % e)
+
+def blog_wise_open_view():
+    """
+    Wisely decides whether to wipe out the content of current buffer or open a new splited window.
+    """
+    if vim.current.buffer.name is None and \
+            (vim.eval('&modified') == '0' or \
+                len(vim.current.buffer) == 1):
+        vim.command('setl modifiable')
+        del vim.current.buffer[:]
+        vim.command('setl nomodified')
+    else:
+        vim.command(":new")
+    vim.command('setl syntax=blogsyntax')
+    vim.command('setl completefunc=Completable')
 
 def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
     """
@@ -164,47 +253,55 @@ def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
     sys.stdout.write("%s\n" % result["file"])
     return result
 
-def __exception_check(func):
-    def __check(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except VimPressException, e:
-            sys.stderr.write(str(e))
-        except xmlrpclib.Fault, e:
-            sys.stderr.write("xmlrpc error: %s" % e.faultString.encode("utf-8"))
-        except xmlrpclib.ProtocolError, e:
-            sys.stderr.write("xmlrpc error: %s %s" % (e.url, e.errmsg))
-        except IOError, e:
-            sys.stderr.write("network error: %s" % e)
+@vim_encoding_check
+def vim_input(message = 'input', secret = False):
+    vim.command('call inputsave()')
+    vim.command("let user_input = %s('%s :')" % (("inputsecret" if secret else "input"), message))
+    vim.command('call inputrestore()')
+    return vim.eval('user_input')
 
-    return __check
+def html_preview(text_html, meta):
+    """
+    Opens a browser with a local preview of the content.
+    @params text_html - the html content
+            meta      - a dictionary of the meta data
+    """
+    global vimpress_temp_dir
+    if vimpress_temp_dir == '':
+        vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
+    
+    html = \
+"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Vimpress Local Preview: %(title)s</title>
+<style type="text/css"> ul, li { margin: 1em; } :link,:visited { text-decoration:none } h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; } a img,:link img,:visited img { border:none } body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
+</style>
+</meta>
+</head>
+<body> 
+%(content)s 
+</body>
+</html>
+""" % dict(content = text_html, title = meta["title"])
+    with open(os.path.join(vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
+        f.write(html)
+    webbrowser.open("file://%s" % f.name)
 
-def __vim_encoding_check(func):
-    def __check(*args, **kw):
-        orig_enc = vim.eval("&encoding") 
-        if orig_enc != "utf-8":
-            modified = vim.eval("&modified")
-            buf_list = '\n'.join(vim.current.buffer).decode(orig_enc).encode('utf-8').split('\n')
-            del vim.current.buffer[:]
-            vim.command("setl encoding=utf-8")
-            vim.current.buffer[0] = buf_list[0]
-            if len(buf_list) > 1:
-                vim.current.buffer.append(buf_list[1:])
-            if modified == '0':
-                vim.command('setl nomodified')
-        return func(*args, **kw)
-    return __check
-
-def __xmlrpc_api_check(func):
+def xmlrpc_api_check(func):
     def __check(*args, **kw):
         if wp_api is None or mw_api is None:
             blog_update_config()
         return func(*args, **kw)
     return __check
 
-@__exception_check
-@__vim_encoding_check
-@__xmlrpc_api_check
+#################################################
+# Command Functions
+#################################################
+
+@exception_check
+@vim_encoding_check
+@xmlrpc_api_check
 def blog_save(pub = "draft"):
     """
     Saves the current editing buffer.
@@ -293,9 +390,9 @@ def blog_save(pub = "draft"):
 
     return meta
 
-@__exception_check
-@__vim_encoding_check
-@__xmlrpc_api_check
+@exception_check
+@vim_encoding_check
+@xmlrpc_api_check
 def blog_new(edit_type = "post"):
     """
     Creates a new editing buffer of specified type.
@@ -323,7 +420,7 @@ def blog_new(edit_type = "post"):
     vim.command('setl nomodified')
     vim.command('setl textwidth=0')
 
-@__xmlrpc_api_check
+@xmlrpc_api_check
 def blog_edit(edit_type, post_id):
     """
     Opens a new editing buffer with blog content of specified type and id.
@@ -376,7 +473,7 @@ def blog_edit(edit_type, post_id):
         if vim.eval("mapcheck('%s')" % v):
             vim.command('unmap <buffer> %s' % v)
 
-@__xmlrpc_api_check
+@xmlrpc_api_check
 def blog_delete(edit_type, post_id):
     """
     Deletes a page or post of specified id.
@@ -400,7 +497,7 @@ def blog_delete(edit_type, post_id):
     if vimpress_view.startswith("list"):
         blog_list(edit_type)
 
-@__exception_check
+@exception_check
 def blog_list_on_key_press(action):
     """
     Calls blog open on the current line of a listing buffer.
@@ -445,9 +542,9 @@ def blog_list_on_key_press(action):
     elif action == "delete":
         blog_delete(edit_type, int(id))
 
-@__exception_check
-@__vim_encoding_check
-@__xmlrpc_api_check
+@exception_check
+@vim_encoding_check
+@xmlrpc_api_check
 def blog_list(edit_type = "post", count = "30"):
     """
     Creates a listing buffer of specified type.
@@ -481,9 +578,9 @@ def blog_list(edit_type = "post", count = "30"):
     vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete')<cr>" % list_view_key_map)
     sys.stdout.write("Press <Enter> to edit. <Delete> to move to trash.\n")
 
-@__exception_check
-@__vim_encoding_check
-@__xmlrpc_api_check
+@exception_check
+@vim_encoding_check
+@xmlrpc_api_check
 def blog_upload_media(file_path):
     """
     Uploads a file to the blog.
@@ -510,8 +607,8 @@ def blog_upload_media(file_path):
         ran.append(result["url"])
     ran.append('')
 
-@__exception_check
-@__vim_encoding_check
+@exception_check
+@vim_encoding_check
 def blog_append_code(code_type = ""):
     if vimpress_view != 'edit':
         raise VimPressException("Command not available at list view.")
@@ -528,8 +625,8 @@ def blog_append_code(code_type = ""):
     vim.current.range.append(code_block)
     vim.current.window.cursor = (row + len(code_block), 0)
 
-@__exception_check
-@__vim_encoding_check
+@exception_check
+@vim_encoding_check
 def blog_preview(pub = "local"):
     """
     Opens a browser window displaying the content.
@@ -561,7 +658,7 @@ def blog_preview(pub = "local"):
         raise VimPressException("Invalid option: %s " % pub)
 
 
-@__exception_check
+@exception_check
 def blog_guess_open(what):
     """
     Tries several methods to get the post id from different user inputs, such as args, url, postid etc.
@@ -617,45 +714,8 @@ def blog_guess_open(what):
         raise VimPressException("Failed to get post/page id from '%s'." % what)
 
 
-@__exception_check
-def blog_update_config():
-    """
-    Updates the script's configuration variables.
-    """
-    global blog_username, blog_password, blog_url, mw_api, wp_api
-    try:
-        config = vim.eval("VIMPRESS")[blog_conf_index]
-        blog_username = config['username']
-        blog_url = config['blog_url']
-        sys.stdout.write("Connecting to %s \n" % blog_url)
-        blog_password = config.get('password', '')
-        if blog_password == '':
-           blog_password = vim_input("Enter password for %s" % blog_url, True)
-        mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).metaWeblog
-        wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).wp
-
-        # Setting tags and categories for completefunc
-        terms = []
-        terms.extend([i["description"].encode("utf-8") 
-            for i in mw_api.getCategories('', blog_username, blog_password)])
-        # adding tags may make the menu too much items to choose.
-        #terms.extend([i["name"].encode("utf-8") for i in wp_api.getTags('', blog_username, blog_password)])
-        vim.command('let s:completable = "%s"' % '|'.join(terms))
-
-    except vim.error:
-        raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
-    except KeyError, e:
-        raise VimPressException("Configuration error: %s" % e)
-
-@__vim_encoding_check
-def vim_input(message = 'input', secret = False):
-    vim.command('call inputsave()')
-    vim.command("let user_input = %s('%s :')" % (("inputsecret" if secret else "input"), message))
-    vim.command('call inputrestore()')
-    return vim.eval('user_input')
-
-@__exception_check
-@__vim_encoding_check
+@exception_check
+@vim_encoding_check
 def blog_config_switch(conf_index = -1):
     """
     Switches the blog to the next index of the configuration array.
@@ -681,45 +741,3 @@ def blog_config_switch(conf_index = -1):
         blog_list()
     sys.stdout.write("Vimpress switched to %s" % blog_url)
 
-def html_preview(text_html, meta):
-    """
-    Opens a browser with a local preview of the content.
-    @params text_html - the html content
-            meta      - a dictionary of the meta data
-    """
-    global vimpress_temp_dir
-    if vimpress_temp_dir == '':
-        vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
-    
-    html = \
-"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html><head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>Vimpress Local Preview: %(title)s</title>
-<style type="text/css"> ul, li { margin: 1em; } :link,:visited { text-decoration:none } h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; } a img,:link img,:visited img { border:none } body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
-</style>
-</meta>
-</head>
-<body> 
-%(content)s 
-</body>
-</html>
-""" % dict(content = text_html, title = meta["title"])
-    with open(os.path.join(vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
-        f.write(html)
-    webbrowser.open("file://%s" % f.name)
-
-def blog_wise_open_view():
-    """
-    Wisely decides whether to wipe out the content of current buffer or open a new splited window.
-    """
-    if vim.current.buffer.name is None and \
-            (vim.eval('&modified') == '0' or \
-                len(vim.current.buffer) == 1):
-        vim.command('setl modifiable')
-        del vim.current.buffer[:]
-        vim.command('setl nomodified')
-    else:
-        vim.command(":new")
-    vim.command('setl syntax=blogsyntax')
-    vim.command('setl completefunc=Completable')
