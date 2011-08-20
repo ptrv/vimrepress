@@ -11,49 +11,6 @@ except ImportError:
                 raise VimPressException("The package python-markdown is required and is either not present or not properly installed.")
         markdown = markdown_stub()
 
-#################################################
-# Golbal Variables
-#################################################
-
-DEFAULT_LIST_COUNT = "15"
-image_template = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" /></a>'
-blog_username = None
-blog_password = None
-blog_url = None
-blog_conf_index = 0
-vimpress_view = 'edit'
-vimpress_temp_dir = ''
-
-mw_api = None
-wp_api = None
-marker = ("=========== Meta ============", 
-        "=============================", 
-        "========== Content ==========",
-        '"====== Press Here for More ======')
-list_view_key_map = dict(enter = "<enter>", delete = "<delete>")
-
-tag_string = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
-tag_re = re.compile(tag_string % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_name>\S+)'))
-
-default_meta = dict(strid = "", title = "", slug = "", 
-        cats = "", tags = "", editformat = "Markdown", edittype = "post", textattach = '')
-
-POSTS_MAX = -1
-POSTS_TITLES = []
-
-#################################################
-# Helper Classes
-#################################################
-
-class VimPressException(Exception):
-    pass
-
-class VimPressFailedGetMkd(VimPressException):
-    pass
-
-#################################################
-# Helper Functions
-#################################################
 
 def exception_check(func):
     def __check(*args, **kwargs):
@@ -69,6 +26,113 @@ def exception_check(func):
             sys.stderr.write("network error: %s" % e)
 
     return __check
+
+#################################################
+# Helper Classes
+#################################################
+
+class VimPressException(Exception):
+    pass
+
+class VimPressFailedGetMkd(VimPressException):
+    pass
+class DataObject(object):
+
+    #CONST
+    DEFAULT_LIST_COUNT = "15"
+    IMAGE_TEMPLATE = '<a href="%(url)s"><img title="%(file)s" alt="%(file)s" src="%(url)s" class="aligncenter" /></a>'
+    MARKER = dict(bg = "=========== Meta ============", 
+                  mid = "=============================", 
+                  ed = "========== Content ==========",
+                  more = '"====== Press Here for More ======',
+                  list_title = '"====== List of %(edit_type)s(s) in %(blog_url)s =========')
+    LIST_VIEW_KEY_MAP = dict(enter = "<enter>", delete = "<delete>")
+    DEFAULT_META = dict(strid = "", title = "", slug = "", 
+                        cats = "", tags = "", editformat = "Markdown", 
+                        edittype = "post", textattach = '')
+    TAG_STRING = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
+    TAG_RE = re.compile(TAG_STRING % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_name>\S+)'))
+
+    #Temp variables.
+    blog_username = None
+    blog_password = None
+    blog_url = None
+    conf_index = 0
+    view = 'edit'
+    vimpress_temp_dir = ''
+    mw_api = None
+    wp_api = None
+    posts_max = -1
+    posts_titles = []
+
+    def is_api_ready(self):
+        return not (self.wp_api is None or self.mw_api is None)
+
+    @exception_check
+    def blog_update_config(self):
+        """
+        Updates the script's configuration variables.
+        """
+        try:
+            config = vim.eval("VIMPRESS")[self.conf_index]
+
+            self.blog_username = config['username']
+            self.blog_password = config.get('password', '')
+            self.blog_url = config['blog_url']
+
+            sys.stdout.write("Connecting to %s \n" % self.blog_url)
+
+            if self.blog_password == '':
+               self.blog_password = vim_input("Enter password for %s" % self.blog_url, True)
+            self.mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).metaWeblog
+            self.wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).wp
+
+            # Setting tags and categories for completefunc
+            terms = []
+            terms.extend([i["description"].encode("utf-8") 
+                for i in self.mw_api.getCategories('', self.blog_username, self.blog_password)])
+
+            # adding tags may make the menu too much items to choose.
+            #terms.extend([i["name"].encode("utf-8") for i in self.wp_api.getTags('', self.blog_username, self.blog_password)])
+            vim.command('let s:completable = "%s"' % '|'.join(terms))
+
+        except vim.error:
+            raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
+        except KeyError, e:
+            raise VimPressException("Configuration error: %s" % e)
+
+    @exception_check
+    def config_switch(self, index = -1):
+        try:
+            index = int(index)
+        except ValueError:
+            raise VimPressException("Invalid Index: %s" % index)
+
+        conf = vim.eval("VIMPRESS")
+         # Next conf
+        if index < 0:
+            self.conf_index += 1
+            if self.conf_index >= len(conf):
+                self.conf_index = 0
+
+         # User enter index
+        else:
+            if index >= len(conf):
+                raise VimPressException("Invalid Index: %d" % index)
+            self.conf_index = index
+
+        self.blog_update_config()
+        sys.stdout.write("Vimpress switched to '%s'@'%s'\n" % (self.blog_username, self.blog_url))
+
+
+#################################################
+# Golbal Variables
+#################################################
+g_data = DataObject()
+
+#################################################
+# Helper Functions
+#################################################
 
 def vim_encoding_check(func):
     def __check(*args, **kw):
@@ -86,37 +150,37 @@ def vim_encoding_check(func):
         return func(*args, **kw)
     return __check
 
-def view_switch(view = "", assert_view = "", reset = False, command = ""):
+def view_switch(view = "", assert_view = "", reset = False):
     def switch(func):
         def __run(*args, **kw):
-            global vimpress_view, POSTS_MAX
             if assert_view != '':
-                if vimpress_view != assert_view:
+                if g_data.view != assert_view:
                     raise VimPressException("Command only available at '%s' view." % assert_view)
 
-            if command != "":
-                if command == "blog_new":
-                    if vimpress_view == "list":
-                        kw["currentContent"] = ['']
-                    else:
-                        kw["currentContent"] = vim.current.buffer[:]
-                elif command == "blog_switch":
-                    if vimpress_view == "list":
-                        kw["refresh_list"] = True
+            if func.func_name == "blog_new":
+                if g_data.view == "list":
+                    kw["currentContent"] = ['']
+                else:
+                    kw["currentContent"] = vim.current.buffer[:]
+            elif func.func_name == "blog_config_switch":
+                if g_data.view == "list":
+                    kw["refresh_list"] = True
 
             if reset:
-                POSTS_MAX = -1
+                g_data.posts_max = -1
+                g_data.posts_titles = None
+
             if view != '':
                 #Switching view
-                if vimpress_view != view:
+                if g_data.view != view:
 
                     #from list view
-                    if vimpress_view == "list":
-                        for v in list_view_key_map.values():
+                    if g_data.view == "list":
+                        for v in g_data.LIST_VIEW_KEY_MAP.values():
                             if vim.eval("mapcheck('%s')" % v):
                                 vim.command('unmap <buffer> %s' % v)
 
-                    vimpress_view = view
+                    g_data.view = view
 
             return func(*args, **kw)
         return __run
@@ -130,11 +194,11 @@ def blog_meta_parse():
     """
     meta = dict()
     start = 0
-    while not vim.current.buffer[start][1:].startswith(marker[0]):
+    while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
         start +=1
 
     end = start + 1
-    while not vim.current.buffer[end][1:].startswith(marker[2]):
+    while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
         if not vim.current.buffer[end].startswith('"===='):
             line = vim.current.buffer[end][1:].strip().split(":")
             k, v = line[0].strip().lower(), ':'.join(line[1:])
@@ -150,11 +214,11 @@ def blog_meta_area_update(**kw):
     @params **kwargs - keyworded arguments
     """
     start = 0
-    while not vim.current.buffer[start][1:].startswith(marker[0]):
+    while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
         start +=1
 
     end = start + 1
-    while not vim.current.buffer[end][1:].startswith(marker[2]):
+    while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
         if not vim.current.buffer[end].startswith('"===='):
             line = vim.current.buffer[end][1:].strip().split(":")
             k, v = line[0].strip().lower(), ':'.join(line[1:])
@@ -169,11 +233,11 @@ def blog_fill_meta_area(meta):
     are replaced by default values from the default_meta variable.
     @params meta - a dictionary of meta data
     """
-    for k in default_meta.keys():
+    for k in g_data.DEFAULT_META.keys():
         if k not in meta:
-            meta[k] = default_meta[k]
+            meta[k] = g_data.DEFAULT_META[k]
 
-    meta.update(dict(bg = marker[0], mid = marker[1], ed = marker[2]))
+    meta.update(g_data.MARKER)
     template = dict( \
         post = \
 """"%(bg)s
@@ -214,7 +278,7 @@ def blog_get_mkd_attachment(post):
     attach = dict()
     try:
         lead = post.rindex("<!-- ")
-        data = re.search(tag_re, post[lead:])
+        data = re.search(g_data.TAG_RE, post[lead:])
         if data is None:
             raise ValueError()
         attach.update(data.groupdict())
@@ -226,35 +290,6 @@ def blog_get_mkd_attachment(post):
 
     return attach
 
-@exception_check
-def blog_update_config():
-    """
-    Updates the script's configuration variables.
-    """
-    global blog_username, blog_password, blog_url, mw_api, wp_api
-    try:
-        config = vim.eval("VIMPRESS")[blog_conf_index]
-        blog_username = config['username']
-        blog_url = config['blog_url']
-        sys.stdout.write("Connecting to %s \n" % blog_url)
-        blog_password = config.get('password', '')
-        if blog_password == '':
-           blog_password = vim_input("Enter password for %s" % blog_url, True)
-        mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).metaWeblog
-        wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % blog_url).wp
-
-        # Setting tags and categories for completefunc
-        terms = []
-        terms.extend([i["description"].encode("utf-8") 
-            for i in mw_api.getCategories('', blog_username, blog_password)])
-        # adding tags may make the menu too much items to choose.
-        #terms.extend([i["name"].encode("utf-8") for i in wp_api.getTags('', blog_username, blog_password)])
-        vim.command('let s:completable = "%s"' % '|'.join(terms))
-
-    except vim.error:
-        raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
-    except KeyError, e:
-        raise VimPressException("Configuration error: %s" % e)
 
 def blog_wise_open_view():
     """
@@ -288,7 +323,7 @@ def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
         overwrite = True
 
     sys.stdout.write("Markdown file uploading ... ")
-    result = mw_api.newMediaObject(1, blog_username, blog_password, 
+    result = g_data.mw_api.newMediaObject(1, g_data.blog_username, g_data.blog_password, 
                 dict(name = attach_name, 
                     type = "text/plain", bits = bits, 
                     overwrite = overwrite))
@@ -308,9 +343,8 @@ def html_preview(text_html, meta):
     @params text_html - the html content
             meta      - a dictionary of the meta data
     """
-    global vimpress_temp_dir
-    if vimpress_temp_dir == '':
-        vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
+    if g_data.vimpress_temp_dir == '':
+        g_data.vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
     
     html = \
 """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -326,14 +360,14 @@ def html_preview(text_html, meta):
 </body>
 </html>
 """ % dict(content = text_html, title = meta["title"])
-    with open(os.path.join(vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
+    with open(os.path.join(g_data.vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
         f.write(html)
     webbrowser.open("file://%s" % f.name)
 
 def xmlrpc_api_check(func):
     def __check(*args, **kw):
-        if wp_api is None or mw_api is None:
-            blog_update_config()
+        if not g_data.is_api_ready():
+            g_data.blog_update_config()
         return func(*args, **kw)
     return __check
 
@@ -366,7 +400,7 @@ def blog_save(pub = "draft"):
         text = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
 
         # Add tag string at the last of the post.
-        text += tag_string % attach
+        text += g_data.TAG_STRING % attach
     else:
         text = rawtext
 
@@ -386,10 +420,10 @@ def blog_save(pub = "draft"):
     # New posts
     if strid == '':
         if edit_type == "post":
-            strid = mw_api.newPost('', blog_username, blog_password, 
+            strid = g_data.mw_api.newPost('', g_data.blog_username, g_data.blog_password, 
                     post_struct, is_publish)
         else:
-            strid = wp_api.newPage('', blog_username, blog_password, 
+            strid = g_data.wp_api.newPage('', g_data.blog_username, g_data.blog_password, 
                     post_struct, is_publish)
 
         meta["strid"] = strid
@@ -397,14 +431,14 @@ def blog_save(pub = "draft"):
         # update meat area if slug or categories is empty
         if edit_type == "post":
             if meta["slug"] == '' or meta["cats"] == '':
-                data = mw_api.getPost(strid, blog_username, blog_password)
+                data = g_data.mw_api.getPost(strid, g_data.blog_username, g_data.blog_password)
                 cats = ",".join(data["categories"]).encode("utf-8")
                 slug = data["wp_slug"].encode("utf-8")
                 meta["cats"] = cats
                 meta["slug"] = slug
         else: 
             if meta["slug"] == '':
-                data = wp_api.getPage('', strid, blog_username, blog_password)
+                data = g_data.wp_api.getPage('', strid, g_data.blog_username, g_data.blog_password)
                 slug = data["wp_slug"].encode("utf-8")
                 meta["slug"] = slug
 
@@ -417,10 +451,10 @@ def blog_save(pub = "draft"):
     # Old posts
     else:
         if edit_type == "post":
-            mw_api.editPost(strid, blog_username, blog_password, 
+            g_data.mw_api.editPost(strid, g_data.blog_username, g_data.blog_password, 
                     post_struct, is_publish)
         elif edit_type == "page":
-            wp_api.editPage('', strid, blog_username, blog_password, 
+            g_data.wp_api.editPage('', strid, g_data.blog_username, g_data.blog_password, 
                     post_struct, is_publish)
 
         notify = "%s edited and %s.   ID=%s" % \
@@ -434,7 +468,7 @@ def blog_save(pub = "draft"):
 @exception_check
 @vim_encoding_check
 @xmlrpc_api_check
-@view_switch(view = "edit", command = "blog_new")
+@view_switch(view = "edit")
 def blog_new(edit_type = "post", currentContent = None):
     """
     Creates a new editing buffer of specified type.
@@ -465,9 +499,9 @@ def blog_edit(edit_type, post_id):
         raise VimPressException("Invalid option: %s " % edit_type)
 
     if edit_type.lower() == "post":
-        data = mw_api.getPost(post_id, blog_username, blog_password)
+        data = g_data.mw_api.getPost(post_id, g_data.blog_username, g_data.blog_password)
     else: 
-        data = wp_api.getPage('', post_id, blog_username, blog_password)
+        data = g_data.wp_api.getPage('', post_id, g_data.blog_username, g_data.blog_password)
 
     meta_dict = dict(\
             strid = str(post_id), 
@@ -498,12 +532,12 @@ def blog_edit(edit_type, post_id):
     vim.command('setl nomodified')
     vim.command('setl textwidth=0')
 
-    for v in list_view_key_map.values():
+    for v in g_data.LIST_VIEW_KEY_MAP.values():
         if vim.eval("mapcheck('%s')" % v):
             vim.command('unmap <buffer> %s' % v)
 
 @xmlrpc_api_check
-@view_switch(assert_view = "list", reset = True, command = "blog_delete")
+@view_switch(assert_view = "list", reset = True)
 def blog_delete(edit_type, post_id):
     """
     Deletes a page or post of specified id.
@@ -514,9 +548,9 @@ def blog_delete(edit_type, post_id):
         raise VimPressException("Invalid option: %s " % edit_type)
 
     if edit_type.lower() == "post":
-        deleted = mw_api.deletePost('0123456789ABCDEF', post_id, blog_username, blog_password, True)
+        deleted = g_data.mw_api.deletePost('0', post_id, g_data.blog_username, g_data.blog_password, True)
     else:
-        deleted = wp_api.deletePage('', blog_username, blog_password, post_id)
+        deleted = g_data.wp_api.deletePage('', g_data.blog_username, g_data.blog_password, post_id)
 
     if deleted:
         sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
@@ -543,13 +577,13 @@ def blog_list_on_key_press(action, edit_type):
         int(id)
     except ValueError:
         if line.find("More") != -1:
-            if POSTS_MAX != -1:
+            if g_data.posts_max != -1:
                 sys.stdout.write("No more posts.")
                 return
             vim.command("setl modifiable")
             del vim.current.buffer[len(vim.current.buffer) - 1:]
             append_blog_list(edit_type)
-            vim.current.buffer.append(marker[3])
+            vim.current.buffer.append(g_data.MARKER['more'])
             vim.command("setl nomodified")
             vim.command("setl nomodifiable")
             return
@@ -577,21 +611,20 @@ def blog_list_on_key_press(action, edit_type):
         blog_delete(edit_type, int(id))
 
 
-def append_blog_list(edit_type, count = DEFAULT_LIST_COUNT):
-    global POSTS_MAX, POSTS_TITLES
+def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
         current_posts = len(vim.current.buffer) - 1
         retrive_count = int(count) + current_posts
 
-        POSTS_TITLES = mw_api.getRecentPosts('', blog_username, blog_password, retrive_count)
-        len_allposts = len(POSTS_TITLES)
+        g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
+        len_allposts = len(g_data.posts_titles)
         if len_allposts < current_posts + int(count):
-            POSTS_MAX = len_allposts
+            g_data.posts_max = len_allposts
 
         vim.current.buffer.append(\
-                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in POSTS_TITLES[current_posts:]])
+                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in g_data.posts_titles[current_posts:]])
     else:
-        pages = wp_api.getPageList('', blog_username, blog_password)
+        pages = g_data.wp_api.getPageList('', g_data.blog_username, g_data.blog_password)
         vim.current.buffer.append(\
             [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
 
@@ -599,26 +632,37 @@ def append_blog_list(edit_type, count = DEFAULT_LIST_COUNT):
 @vim_encoding_check
 @xmlrpc_api_check
 @view_switch(view = "list")
-def blog_list(edit_type = "post"):
+def blog_list(edit_type = "post", keep_type = False):
     """
     Creates a listing buffer of specified type.
     @params edit_type - either "post(s)" or "page(s)"
     """
+    if keep_type:
+        first_line = vim.current.buffer[0]
+        re_tag = g_data.MARKER["list_title"].replace('(s)', r'\(s\)') \
+                        % dict(edit_type = "(\\S+)", blog_url = ".+")
+        result = re.search(re_tag, first_line)
+        if result is not None:
+            edit_type = result.group(1).lower()
+
     blog_wise_open_view()
-    vim.current.buffer[0] = "\"====== List of %ss in %s =========" % (edit_type.capitalize(), blog_url)
+    vim.current.buffer[0] = g_data.MARKER["list_title"] % \
+                                dict(edit_type = edit_type.capitalize(), blog_url = g_data.blog_url)
 
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
 
-    append_blog_list(edit_type, DEFAULT_LIST_COUNT)
+    append_blog_list(edit_type, g_data.DEFAULT_LIST_COUNT)
 
-    vim.current.buffer.append(marker[3])
+    vim.current.buffer.append(g_data.MARKER['more'])
 
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
     vim.current.window.cursor = (2, 0)
-    vim.command("map <silent> <buffer> %(enter)s :py blog_list_on_key_press('open', '%%s')<cr>" % list_view_key_map % edit_type)
-    vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete', '%%s')<cr>" % list_view_key_map % edit_type)
+    vim.command("map <silent> <buffer> %(enter)s :py blog_list_on_key_press('open', '%%s')<cr>" 
+            % g_data.LIST_VIEW_KEY_MAP % edit_type)
+    vim.command("map <silent> <buffer> %(delete)s :py blog_list_on_key_press('delete', '%%s')<cr>" 
+            % g_data.LIST_VIEW_KEY_MAP % edit_type)
     sys.stdout.write("Press <Enter> to edit. <Delete> to move to trash.\n")
 
 @exception_check
@@ -638,12 +682,12 @@ def blog_upload_media(file_path):
     with open(file_path) as f:
         bits = xmlrpclib.Binary(f.read())
 
-    result = mw_api.newMediaObject('', blog_username, blog_password, 
+    result = g_data.mw_api.newMediaObject('', g_data.blog_username, g_data.blog_password, 
             dict(name = name, type = filetype, bits = bits))
 
     ran = vim.current.range
     if filetype.startswith("image"):
-        img = image_template % result
+        img = g_data.IMAGE_TEMPLATE % result
         ran.append(img)
     else:
         ran.append(result["url"])
@@ -688,9 +732,9 @@ def blog_preview(pub = "local"):
     elif pub == "publish" or pub == "draft":
         meta = blog_save(pub)
         if meta["edittype"] == "page":
-            prev_url = "%s?pageid=%s&preview=true" % (blog_url, meta["strid"])
+            prev_url = "%s?pageid=%s&preview=true" % (g_data.blog_url, meta["strid"])
         else:
-            prev_url = "%s?p=%s&preview=true" % (blog_url, meta["strid"])
+            prev_url = "%s?p=%s&preview=true" % (g_data.blog_url, meta["strid"])
         webbrowser.open(prev_url)
         if pub == "draft":
             sys.stdout.write("\nYou have to login in the browser to preview the post when save as draft.")
@@ -747,38 +791,21 @@ def blog_guess_open(what):
 
     # detected something
     if post_id != '':
-        if blog_index != -1 and blog_index != blog_conf_index:
+        if blog_index != -1 and blog_index != g_data.conf_index:
             blog_config_switch(blog_index)
         blog_edit("post", post_id)
     else:
         raise VimPressException("Failed to get post/page id from '%s'." % what)
 
 
-@exception_check
 @vim_encoding_check
-@view_switch(reset = True, command = "blog_switch")
-def blog_config_switch(conf_index = -1, refresh_list = False):
+@view_switch(reset = True) 
+def blog_config_switch(index = -1, refresh_list = False):
     """
     Switches the blog to the next index of the configuration array.
     """
-    global blog_conf_index
-    try:
-        conf_index = int(conf_index)
-    except ValueError:
-        raise VimPressException("Invalid Index: %s" % conf_index)
+    g_data.config_switch(index)
 
-    conf = vim.eval("VIMPRESS")
-    if conf_index == -1:
-        blog_conf_index += 1
-        if blog_conf_index >= len(conf):
-            blog_conf_index = 0
-    else:
-        if conf_index >= len(conf):
-            raise VimPressException("Invalid Index: %d" % conf_index)
-        blog_conf_index = conf_index
-
-    blog_update_config()
     if refresh_list:
-        blog_list()
-    sys.stdout.write("Vimpress switched to %s" % blog_url)
+        blog_list(keep_type = True)
 
