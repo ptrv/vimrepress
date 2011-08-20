@@ -168,7 +168,7 @@ def view_switch(view = "", assert_view = "", reset = False):
 
             if reset:
                 g_data.posts_max = -1
-                g_data.posts_titles = None
+                g_data.posts_titles = []
 
             if view != '':
                 #Switching view
@@ -614,12 +614,15 @@ def blog_list_on_key_press(action, edit_type):
 def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
         current_posts = len(vim.current.buffer) - 1
-        retrive_count = int(count) + current_posts
 
-        g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
-        len_allposts = len(g_data.posts_titles)
-        if len_allposts < current_posts + int(count):
-            g_data.posts_max = len_allposts
+        if not (current_posts == 0 and len(g_data.posts_titles) > 0):
+            if g_data.posts_max == -1:
+                retrive_count = int(count) + current_posts
+                g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
+                len_allposts = len(g_data.posts_titles)
+                if len_allposts < current_posts + int(count):
+                    g_data.posts_max = len_allposts
+
 
         vim.current.buffer.append(\
                 [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in g_data.posts_titles[current_posts:]])
@@ -654,7 +657,8 @@ def blog_list(edit_type = "post", keep_type = False):
 
     append_blog_list(edit_type, g_data.DEFAULT_LIST_COUNT)
 
-    vim.current.buffer.append(g_data.MARKER['more'])
+    if edit_type == "post":
+        vim.current.buffer.append(g_data.MARKER['more'])
 
     vim.command("setl nomodified")
     vim.command("setl nomodifiable")
