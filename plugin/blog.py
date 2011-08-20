@@ -396,7 +396,7 @@ def blog_save(pub = "draft"):
     if meta["editformat"].strip().lower() == "markdown":
         attach = blog_upload_markdown_attachment(
                 meta["strid"], meta["textattach"], rawtext)
-        blog_meta_area_update(textattach = attach["file"])
+        meta["textattach"] = attach["file"]
         text = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
 
         # Add tag string at the last of the post.
