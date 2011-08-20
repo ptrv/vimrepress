@@ -442,7 +442,6 @@ def blog_save(pub = "draft"):
                 slug = data["wp_slug"].encode("utf-8")
                 meta["slug"] = slug
 
-        blog_meta_area_update(**meta)
 
         notify = "%s %s.   ID=%s" % \
                 (edit_type.capitalize(), 
@@ -460,6 +459,7 @@ def blog_save(pub = "draft"):
         notify = "%s edited and %s.   ID=%s" % \
                 (edit_type.capitalize(), "published" if is_publish else "saved as a draft", strid)
 
+    blog_meta_area_update(**meta)
     sys.stdout.write(notify)
     vim.command('setl nomodified')
 
