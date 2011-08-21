@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import urllib, urllib2, vim, xmlrpclib, sys, string, re, os, mimetypes, webbrowser, tempfile, time
+import urllib, urllib2, vim, xmlrpclib, sys, re, os, mimetypes, webbrowser, tempfile, time
 try:
     import markdown
 except ImportError:
@@ -285,7 +285,7 @@ def blog_get_mkd_attachment(post):
             raise ValueError()
         attach.update(data.groupdict())
         attach["mkd_rawtext"] = urllib2.urlopen(attach["mkd_url"]).read()
-    except ValueError, e:
+    except ValueError:
         return dict()
     except IOError:
         raise VimPressFailedGetMkd("The attachment URL was found but was unable to be read.")
