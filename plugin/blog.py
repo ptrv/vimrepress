@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import urllib, urllib2, vim, xml.dom.minidom, xmlrpclib, sys, string, re, os, mimetypes, webbrowser, tempfile, time
+import urllib, urllib2, vim, xmlrpclib, sys, string, re, os, mimetypes, webbrowser, tempfile, time
 try:
     import markdown
 except ImportError:
@@ -16,12 +16,10 @@ def exception_check(func):
     def __check(*args, **kwargs):
         try:
             return func(*args, **kwargs)
-        except VimPressException, e:
+        except (VimPressException, AssertionError), e:
             sys.stderr.write(str(e))
-        except xmlrpclib.Fault, e:
+        except (xmlrpclib.Fault, xmlrpclib.ProtocolError), e:
             sys.stderr.write("xmlrpc error: %s" % e.faultString.encode("utf-8"))
-        except xmlrpclib.ProtocolError, e:
-            sys.stderr.write("xmlrpc error: %s %s" % (e.url, e.errmsg))
         except IOError, e:
             sys.stderr.write("network error: %s" % e)
 
@@ -45,7 +43,7 @@ class DataObject(object):
                   mid = "=============================", 
                   ed = "========== Content ==========",
                   more = '"====== Press Here for More ======',
-                  list_title = '"====== List of %(edit_type)s(s) in %(blog_url)s =========')
+                  list_title = '"====== %(edit_type)s List in %(blog_url)s =========')
     LIST_VIEW_KEY_MAP = dict(enter = "<enter>", delete = "<delete>")
     DEFAULT_META = dict(strid = "", title = "", slug = "", 
                         cats = "", tags = "", editformat = "Markdown", 
@@ -57,73 +55,78 @@ class DataObject(object):
     blog_username = None
     blog_password = None
     blog_url = None
-    conf_index = 0
+    __conf_index = 0
     view = 'edit'
     vimpress_temp_dir = ''
     mw_api = None
     wp_api = None
     posts_max = -1
     posts_titles = []
+    config = None
+
+    def __conf_check(func):
+        def check(*args, **kwargs):
+            self = args[0]
+            if self.config is None:
+                try:
+                    self.config = vim.eval("VIMPRESS")
+                except vim.error:
+                    raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
+            return func(*args, **kwargs)
+        return check
 
     def is_api_ready(self):
         return not (self.wp_api is None or self.mw_api is None)
 
     @exception_check
+    @__conf_check
     def blog_update_config(self):
         """
         Updates the script's configuration variables.
         """
         try:
-            config = vim.eval("VIMPRESS")[self.conf_index]
-
+            config = self.config[self.conf_index]
             self.blog_username = config['username']
             self.blog_password = config.get('password', '')
             self.blog_url = config['blog_url']
-
-            sys.stdout.write("Connecting to %s \n" % self.blog_url)
-
-            if self.blog_password == '':
-               self.blog_password = vim_input("Enter password for %s" % self.blog_url, True)
-            self.mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).metaWeblog
-            self.wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).wp
-
-            # Setting tags and categories for completefunc
-            terms = []
-            terms.extend([i["description"].encode("utf-8") 
-                for i in self.mw_api.getCategories('', self.blog_username, self.blog_password)])
-
-            # adding tags may make the menu too much items to choose.
-            #terms.extend([i["name"].encode("utf-8") for i in self.wp_api.getTags('', self.blog_username, self.blog_password)])
-            vim.command('let s:completable = "%s"' % '|'.join(terms))
-
-        except vim.error:
-            raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
         except KeyError, e:
             raise VimPressException("Configuration error: %s" % e)
 
-    @exception_check
-    def config_switch(self, index = -1):
+        sys.stdout.write("Connecting to '%s' ... " % self.blog_url)
+
+        if self.blog_password == '':
+           self.blog_password = vim_input("Enter password for %s" % self.blog_url, True)
+        self.mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).metaWeblog
+        self.wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).wp
+
+        # Setting tags and categories for completefunc
+        terms = []
+        terms.extend([i["description"].encode("utf-8") 
+            for i in self.mw_api.getCategories('', self.blog_username, self.blog_password)])
+
+        # adding tags may make the menu too much items to choose.
+        #terms.extend([i["name"].encode("utf-8") for i in self.wp_api.getTags('', self.blog_username, self.blog_password)])
+        vim.command('let s:completable = "%s"' % '|'.join(terms))
+        sys.stdout.write("done.\n")
+
+    def __set_conf_index(self, index):
         try:
             index = int(index)
         except ValueError:
             raise VimPressException("Invalid Index: %s" % index)
 
-        conf = vim.eval("VIMPRESS")
-         # Next conf
+         #auto increase
         if index < 0:
-            self.conf_index += 1
-            if self.conf_index >= len(conf):
-                self.conf_index = 0
-
-         # User enter index
+            self.__conf_index += 1
+            if self.__conf_index >= len(self.config):
+                self.__conf_index = 0
+         # user enter index
         else:
-            if index >= len(conf):
-                raise VimPressException("Invalid Index: %d" % index)
-            self.conf_index = index
-
+            assert index < len(self.config), "Invalid Index: %d" % index
+            self.__conf_index = index
         self.blog_update_config()
-        sys.stdout.write("Vimpress switched to '%s'@'%s'\n" % (self.blog_username, self.blog_url))
 
+    conf_index = property(lambda self:self.__conf_index, __set_conf_index)
 
 #################################################
 # Golbal Variables
@@ -315,12 +318,12 @@ def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
     """
     bits = xmlrpclib.Binary(mkd_rawtext)
 
-    # New Post, new file
-    if post_id == '' or attach_name == '':
+    # New Post, or post without a attachtext info
+    overwrite = (post_id != '' and attach_name != '')
+    if not overwrite:
         attach_name = "vimpress_%s_mkd.txt" % hex(int(time.time()))[2:]
-        overwrite = False
-    else:
-        overwrite = True
+
+    assert len(attach_name) > 0, "attach_name 0 length error."
 
     sys.stdout.write("Markdown file uploading ... ")
     result = g_data.mw_api.newMediaObject(1, g_data.blog_username, g_data.blog_password, 
@@ -552,10 +555,8 @@ def blog_delete(edit_type, post_id):
     else:
         deleted = g_data.wp_api.deletePage('', g_data.blog_username, g_data.blog_password, post_id)
 
-    if deleted:
-        sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
-    else:
-        sys.stdout.write("There was a problem deleting the %s.\n" % edit_type)
+    assert deleted, "There was a problem deleting the %s.\n" % edit_type
+    sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
 
     blog_list(edit_type)
 
@@ -577,9 +578,7 @@ def blog_list_on_key_press(action, edit_type):
         int(id)
     except ValueError:
         if line.find("More") != -1:
-            if g_data.posts_max != -1:
-                sys.stdout.write("No more posts.")
-                return
+            assert g_data.posts_max == -1, "No more posts."
             vim.command("setl modifiable")
             del vim.current.buffer[len(vim.current.buffer) - 1:]
             append_blog_list(edit_type)
@@ -596,33 +595,31 @@ def blog_list_on_key_press(action, edit_type):
 
     if action.lower() == "delete":
         confirm = vim_input("Confirm Delete [%s]: %s? [yes/NO]" % (id,title))
-        if confirm != 'yes':
-            sys.stdout.write("Delete Aborted.\n")
-            return
+        assert confirm.lower() == 'yes', "Delete Aborted."
 
     vim.command("setl modifiable")
     del vim.current.buffer[:]
     vim.command("setl nomodified")
-
 
     if action == "open":
         blog_edit(edit_type, int(id))
     elif action == "delete":
         blog_delete(edit_type, int(id))
 
-
+@exception_check
 def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
+        assert g_data.posts_max == -1, "No data allowed to append any more."
         current_posts = len(vim.current.buffer) - 1
 
         if not (current_posts == 0 and len(g_data.posts_titles) > 0):
-            if g_data.posts_max == -1:
-                retrive_count = int(count) + current_posts
-                g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
-                len_allposts = len(g_data.posts_titles)
-                if len_allposts < current_posts + int(count):
-                    g_data.posts_max = len_allposts
+            retrive_count = int(count) + current_posts
+            g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
+            len_allposts = len(g_data.posts_titles)
 
+             #Reached the end
+            if len_allposts < current_posts + int(count):
+                g_data.posts_max = len_allposts
 
         vim.current.buffer.append(\
                 [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in g_data.posts_titles[current_posts:]])
@@ -642,11 +639,8 @@ def blog_list(edit_type = "post", keep_type = False):
     """
     if keep_type:
         first_line = vim.current.buffer[0]
-        re_tag = g_data.MARKER["list_title"].replace('(s)', r'\(s\)') \
-                        % dict(edit_type = "(\\S+)", blog_url = ".+")
-        result = re.search(re_tag, first_line)
-        if result is not None:
-            edit_type = result.group(1).lower()
+        assert first_line.find("List") != -1,"Failed to detect current list type."
+        edit_type = first_line.split()[1].lower()
 
     blog_wise_open_view()
     vim.current.buffer[0] = g_data.MARKER["list_title"] % \
@@ -776,9 +770,6 @@ def blog_guess_open(what):
                         if link.startswith("Link:"):
                             post_id = re.search(r"<\S+?p=(\d+)>", link).group(1)
 
-                    # fail, just give up
-                    if post_id == '':
-                        raise VimPressException("Failed to get post/page id from '%s'." % what)
                 else:
                     post_id = guess_id.group(1)
 
@@ -786,30 +777,31 @@ def blog_guess_open(what):
             else:
                 post_id = guess_id.group(1)
 
+            # detected something ?
+            assert post_id != '', "Failed to get post/page id from '%s'." % what
+
+             #switch view if needed.
+            if blog_index != -1 and blog_index != g_data.conf_index:
+                blog_config_switch(blog_index)
+
         # Uesr input something not a usabe url, try numberic
         else:
             try:
                 post_id = str(int(what))
             except ValueError:
-                pass
+                raise VimPressException("Failed to get post/page id from '%s'." % what)
 
-    # detected something
-    if post_id != '':
-        if blog_index != -1 and blog_index != g_data.conf_index:
-            blog_config_switch(blog_index)
         blog_edit("post", post_id)
-    else:
-        raise VimPressException("Failed to get post/page id from '%s'." % what)
-
 
 @vim_encoding_check
+@xmlrpc_api_check
 @view_switch(reset = True) 
 def blog_config_switch(index = -1, refresh_list = False):
     """
-    Switches the blog to the next index of the configuration array.
+    Switches the blog to the 'index' of the configuration array.
     """
-    g_data.config_switch(index)
-
+    g_data.conf_index = index
     if refresh_list:
         blog_list(keep_type = True)
+    sys.stdout.write("Vimpress switched to '%s'@'%s'\n" % (g_data.blog_username, g_data.blog_url))
 
