@@ -78,7 +78,6 @@ class DataObject(object):
     def is_api_ready(self):
         return not (self.wp_api is None or self.mw_api is None)
 
-    @exception_check
     @__conf_check
     def blog_update_config(self):
         """
@@ -606,7 +605,6 @@ def blog_list_on_key_press(action, edit_type):
     elif action == "delete":
         blog_delete(edit_type, int(id))
 
-@exception_check
 def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
         assert g_data.posts_max == -1, "No data allowed to append any more."
