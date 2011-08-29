@@ -20,20 +20,19 @@
 "               Justin Sattery <justin.slattery@fzysqr.com>
 "               Lenin Lee <lenin.lee@gmail.com>
 "               Conner McDaniel <connermcd@gmail.com>
-"
-"     Forked:   Preston M.[BOYPT] <pentie@gmail.com>
+" Final Forked By:   Preston M.[BOYPT] <pentie@gmail.com>
 "
 " URL:		http://www.friggeri.net/projets/vimblog/
 "           http://pigeond.net/blog/2009/05/07/vimpress-again/
 "           http://pigeond.net/git/?p=vimpress.git
-"           http://apt-blog.net
 "           http://fzysqr.com/
+"           http://apt-blog.net
 "
 " VimRepress 
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
 "
-" Version:	2.2.0
+" Version:	2.3.0
 "
 " Configure: Add blog configure into your .vimrc (password optional)
 "

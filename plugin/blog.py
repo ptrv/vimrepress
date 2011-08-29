@@ -34,6 +34,7 @@ class VimPressException(Exception):
 
 class VimPressFailedGetMkd(VimPressException):
     pass
+
 class DataObject(object):
 
     #CONST
@@ -52,61 +53,17 @@ class DataObject(object):
     TAG_RE = re.compile(TAG_STRING % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_name>\S+)'))
 
     #Temp variables.
-    blog_username = None
-    blog_password = None
-    blog_url = None
+    __xmlrpc = None
     __conf_index = 0
+    __config = None
+
     view = 'edit'
     vimpress_temp_dir = ''
-    mw_api = None
-    wp_api = None
     posts_max = -1
     posts_titles = []
-    config = None
 
-    def __conf_check(func):
-        def check(*args, **kwargs):
-            self = args[0]
-            if self.config is None:
-                try:
-                    self.config = vim.eval("VIMPRESS")
-                except vim.error:
-                    raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
-            return func(*args, **kwargs)
-        return check
-
-    def is_api_ready(self):
-        return not (self.wp_api is None or self.mw_api is None)
-
-    @__conf_check
-    def blog_update_config(self):
-        """
-        Updates the script's configuration variables.
-        """
-        try:
-            config = self.config[self.conf_index]
-            self.blog_username = config['username']
-            self.blog_password = config.get('password', '')
-            self.blog_url = config['blog_url']
-        except KeyError, e:
-            raise VimPressException("Configuration error: %s" % e)
-
-        sys.stdout.write("Connecting to '%s' ... " % self.blog_url)
-
-        if self.blog_password == '':
-           self.blog_password = vim_input("Enter password for %s" % self.blog_url, True)
-        self.mw_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).metaWeblog
-        self.wp_api = xmlrpclib.ServerProxy("%s/xmlrpc.php" % self.blog_url).wp
-
-        # Setting tags and categories for completefunc
-        terms = []
-        terms.extend([i["description"].encode("utf-8") 
-            for i in self.mw_api.getCategories('', self.blog_username, self.blog_password)])
-
-        # adding tags may make the menu too much items to choose.
-        #terms.extend([i["name"].encode("utf-8") for i in self.wp_api.getTags('', self.blog_username, self.blog_password)])
-        vim.command('let s:completable = "%s"' % '|'.join(terms))
-        sys.stdout.write("done.\n")
+    blog_username = property(lambda self: self.xmlrpc.username)
+    blog_url = property(lambda self: self.xmlrpc.blog_url)
 
     def __set_conf_index(self, index):
         try:
@@ -123,9 +80,102 @@ class DataObject(object):
         else:
             assert index < len(self.config), "Invalid Index: %d" % index
             self.__conf_index = index
-        self.blog_update_config()
+
+        self.__xmlrpc = None
 
     conf_index = property(lambda self:self.__conf_index, __set_conf_index)
+
+    def __get_xmlrpc(self):
+        if self.__xmlrpc is None:
+            conf_index = self.conf_index
+            config = self.config[conf_index]
+            if conf_index not in config:
+                try:
+                    blog_username = config['username']
+                    blog_password = config.get('password', '')
+                    blog_url = config['blog_url']
+                except KeyError, e:
+                    raise VimPressException("Configuration error: %s" % e)
+                sys.stdout.write("Connecting to '%s' ... " % blog_url)
+                if blog_password == '':
+                   blog_password = vim_input("Enter password for %s" % blog_url, True)
+                self.__xmlrpc = wp_xmlrpc(blog_url, blog_username, blog_password)
+                config["xmlrpc_obj"] = self.xmlrpc
+
+            self.__xmlrpc = config["xmlrpc_obj"]
+
+            # Setting tags and categories for completefunc
+            categories = config.get("categories", None)
+            if categories is None:
+                categories = [i["description"].encode("utf-8") for i in self.xmlrpc.get_categories()]
+                config["categories"] = categories
+
+            vim.command('let s:completable = "%s"' % '|'.join(categories))
+            sys.stdout.write("done.\n")
+        return self.__xmlrpc
+
+    xmlrpc = property(__get_xmlrpc)
+
+    def __get_config(self):
+        if self.__config is None:
+            try:
+                self.__config = vim.eval("VIMPRESS")
+            except vim.error:
+                raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
+        return self.__config
+
+    config = property(__get_config)
+
+class wp_xmlrpc(object):
+
+    def __init__(self, blog_url, username, password):
+        self.blog_url = blog_url
+        self.username = username
+        self.password = password
+        rpc_url = os.path.join(blog_url, "xmlrpc.php")
+        self.mw_api = xmlrpclib.ServerProxy(rpc_url).metaWeblog
+        self.wp_api = xmlrpclib.ServerProxy(rpc_url).wp
+        self.mt_api = xmlrpclib.ServerProxy(rpc_url).mt
+        self.demo_api = xmlrpclib.ServerProxy(rpc_url).demo
+
+        assert self.demo_api.sayHello() == "Hello!", "XMLRPC Error with communication with '%s'@'%s'" % \
+                (username, blog_url)
+
+    new_post = lambda self, post_struct, is_publish: self.mw_api.newPost('',
+            self.username, self.password, post_struct, is_publish)
+
+    get_post = lambda self, post_id: self.mw_api.getPost(post_id,
+            self.username, self.password) 
+
+    edit_post = lambda self, post_id, post_struct, is_publish: self.mw_api.editPost(post_id,
+            self.username, self.password, post_struct, is_publish)
+
+    delete_post = lambda self, post_id: self.mw_api.deletePost('', post_id, self.username,
+            self.password, '') 
+
+    get_recent_post = lambda self, retrive_count = 0: self.mw_api.getRecentPosts('',
+            self.username, self.password, retrive_count)
+
+    get_recent_post_titles = lambda self, retrive_count = 0: self.mt_api.getRecentPostTitles('',
+            self.username, self.password, retrive_count)
+
+    get_categories = lambda self:self.mw_api.getCategories('', self.username, self.password)
+
+    new_media_object = lambda self, object_struct: self.mw_api.newMediaObject('', self.username,
+            self.password, object_struct)
+
+    new_page = lambda self, post_struct, is_publish: self.wp_api.newPage('',
+            self.username, self.password, post_struct, is_publish)
+
+    get_page = lambda self, page_id: self.wp_api.getPage('', page_id, self.username, self.password) 
+
+    edit_page = lambda self, page_id, post_struct, is_publish: self.wp_api.editPage('', page_id,
+            self.username, self.password, post_struct, is_publish)
+
+    delete_page = lambda self, page_id: self.wp_api.deletePage('',
+            self.username, self.password, page_id) 
+
+    get_page_list = lambda self: self.wp_api.getPageList('', self.username, self.password) 
 
 #################################################
 # Golbal Variables
@@ -325,9 +375,7 @@ def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
     assert len(attach_name) > 0, "attach_name 0 length error."
 
     sys.stdout.write("Markdown file uploading ... ")
-    result = g_data.mw_api.newMediaObject(1, g_data.blog_username, g_data.blog_password, 
-                dict(name = attach_name, 
-                    type = "text/plain", bits = bits, 
+    result = g_data.xmlrpc.new_media_object(dict(name = attach_name, type = "text/plain", bits = bits, 
                     overwrite = overwrite))
     sys.stdout.write("%s\n" % result["file"])
     return result
@@ -366,12 +414,6 @@ def html_preview(text_html, meta):
         f.write(html)
     webbrowser.open("file://%s" % f.name)
 
-def xmlrpc_api_check(func):
-    def __check(*args, **kw):
-        if not g_data.is_api_ready():
-            g_data.blog_update_config()
-        return func(*args, **kw)
-    return __check
 
 #################################################
 # Command Functions
@@ -379,7 +421,6 @@ def xmlrpc_api_check(func):
 
 @exception_check
 @vim_encoding_check
-@xmlrpc_api_check
 @view_switch(assert_view = "edit", reset = True)
 def blog_save(pub = "draft"):
     """
@@ -422,25 +463,23 @@ def blog_save(pub = "draft"):
     # New posts
     if strid == '':
         if edit_type == "post":
-            strid = g_data.mw_api.newPost('', g_data.blog_username, g_data.blog_password, 
-                    post_struct, is_publish)
+            strid = g_data.xmlrpc.new_post(post_struct, is_publish)
         else:
-            strid = g_data.wp_api.newPage('', g_data.blog_username, g_data.blog_password, 
-                    post_struct, is_publish)
+            strid = g_data.xmlrpc.new_page(post_struct, is_publish)
 
         meta["strid"] = strid
 
         # update meat area if slug or categories is empty
         if edit_type == "post":
             if meta["slug"] == '' or meta["cats"] == '':
-                data = g_data.mw_api.getPost(strid, g_data.blog_username, g_data.blog_password)
+                data = g_data.xmlrpc.get_post(strid)
                 cats = ",".join(data["categories"]).encode("utf-8")
                 slug = data["wp_slug"].encode("utf-8")
                 meta["cats"] = cats
                 meta["slug"] = slug
         else: 
             if meta["slug"] == '':
-                data = g_data.wp_api.getPage('', strid, g_data.blog_username, g_data.blog_password)
+                data = g_data.xmlrpc.get_page(strid)
                 slug = data["wp_slug"].encode("utf-8")
                 meta["slug"] = slug
 
@@ -452,11 +491,9 @@ def blog_save(pub = "draft"):
     # Old posts
     else:
         if edit_type == "post":
-            g_data.mw_api.editPost(strid, g_data.blog_username, g_data.blog_password, 
-                    post_struct, is_publish)
+            g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
         elif edit_type == "page":
-            g_data.wp_api.editPage('', strid, g_data.blog_username, g_data.blog_password, 
-                    post_struct, is_publish)
+            g_data.xmlrpc.edit_page(strid, post_struct, is_publish)
 
         notify = "%s edited and %s.   ID=%s" % \
                 (edit_type.capitalize(), "published" if is_publish else "saved as a draft", strid)
@@ -469,7 +506,6 @@ def blog_save(pub = "draft"):
 
 @exception_check
 @vim_encoding_check
-@xmlrpc_api_check
 @view_switch(view = "edit")
 def blog_new(edit_type = "post", currentContent = None):
     """
@@ -487,7 +523,6 @@ def blog_new(edit_type = "post", currentContent = None):
     vim.command('setl nomodified')
     vim.command('setl textwidth=0')
 
-@xmlrpc_api_check
 @view_switch(view = "edit")
 def blog_edit(edit_type, post_id):
     """
@@ -501,9 +536,9 @@ def blog_edit(edit_type, post_id):
         raise VimPressException("Invalid option: %s " % edit_type)
 
     if edit_type.lower() == "post":
-        data = g_data.mw_api.getPost(post_id, g_data.blog_username, g_data.blog_password)
+        data = g_data.xmlrpc.get_post(post_id)
     else: 
-        data = g_data.wp_api.getPage('', post_id, g_data.blog_username, g_data.blog_password)
+        data = g_data.xmlrpc.get_page(post_id)
 
     meta_dict = dict(\
             strid = str(post_id), 
@@ -538,7 +573,6 @@ def blog_edit(edit_type, post_id):
         if vim.eval("mapcheck('%s')" % v):
             vim.command('unmap <buffer> %s' % v)
 
-@xmlrpc_api_check
 @view_switch(assert_view = "list", reset = True)
 def blog_delete(edit_type, post_id):
     """
@@ -550,9 +584,9 @@ def blog_delete(edit_type, post_id):
         raise VimPressException("Invalid option: %s " % edit_type)
 
     if edit_type.lower() == "post":
-        deleted = g_data.mw_api.deletePost('0', post_id, g_data.blog_username, g_data.blog_password, True)
+        deleted = g_data.xmlrpc.delete_post(post_id)
     else:
-        deleted = g_data.wp_api.deletePage('', g_data.blog_username, g_data.blog_password, post_id)
+        deleted = g_data.xmlrpc.delete_page(post_id)
 
     assert deleted, "There was a problem deleting the %s.\n" % edit_type
     sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
@@ -612,7 +646,7 @@ def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
 
         if not (current_posts == 0 and len(g_data.posts_titles) > 0):
             retrive_count = int(count) + current_posts
-            g_data.posts_titles = g_data.mw_api.getRecentPosts('', g_data.blog_username, g_data.blog_password, retrive_count)
+            g_data.posts_titles = g_data.xmlrpc.get_recent_post_titles(retrive_count)
             len_allposts = len(g_data.posts_titles)
 
              #Reached the end
@@ -622,13 +656,12 @@ def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
         vim.current.buffer.append(\
                 [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in g_data.posts_titles[current_posts:]])
     else:
-        pages = g_data.wp_api.getPageList('', g_data.blog_username, g_data.blog_password)
+        pages = g_data.xmlrpc.get_page_list()
         vim.current.buffer.append(\
             [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
 
 @exception_check
 @vim_encoding_check
-@xmlrpc_api_check
 @view_switch(view = "list")
 def blog_list(edit_type = "post", keep_type = False):
     """
@@ -663,7 +696,6 @@ def blog_list(edit_type = "post", keep_type = False):
 
 @exception_check
 @vim_encoding_check
-@xmlrpc_api_check
 @view_switch(assert_view = "edit")
 def blog_upload_media(file_path):
     """
@@ -678,8 +710,7 @@ def blog_upload_media(file_path):
     with open(file_path) as f:
         bits = xmlrpclib.Binary(f.read())
 
-    result = g_data.mw_api.newMediaObject('', g_data.blog_username, g_data.blog_password, 
-            dict(name = name, type = filetype, bits = bits))
+    result = g_data.xmlrpc.new_media_object(dict(name = name, type = filetype, bits = bits))
 
     ran = vim.current.range
     if filetype.startswith("image"):
@@ -791,8 +822,8 @@ def blog_guess_open(what):
 
         blog_edit("post", post_id)
 
+@exception_check
 @vim_encoding_check
-@xmlrpc_api_check
 @view_switch(reset = True) 
 def blog_config_switch(index = -1, refresh_list = False):
     """
