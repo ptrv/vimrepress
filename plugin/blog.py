@@ -187,6 +187,11 @@ g_data = DataObject()
 #################################################
 
 def vim_encoding_check(func):
+    """
+    Decorator.
+    Check vim environment. wordpress via xmlrpc only support unicode data, setting vim
+        to utf-8 for all data compatible.
+    """
     def __check(*args, **kw):
         orig_enc = vim.eval("&encoding") 
         if orig_enc != "utf-8":
@@ -203,6 +208,10 @@ def vim_encoding_check(func):
     return __check
 
 def view_switch(view = "", assert_view = "", reset = False):
+    """
+    Decorator.
+    For commands to switch between edit/list view, data/status need to be configured.
+    """
     def switch(func):
         def __run(*args, **kw):
             if assert_view != '':
@@ -332,11 +341,9 @@ def blog_get_mkd_attachment(post):
         lead = post.rindex("<!-- ")
         data = re.search(g_data.TAG_RE, post[lead:])
         if data is None:
-            raise ValueError()
+            raise VimPressFailedGetMkd("Attached markdown not found.")
         attach.update(data.groupdict())
         attach["mkd_rawtext"] = urllib2.urlopen(attach["mkd_url"]).read()
-    except ValueError:
-        return dict()
     except IOError:
         raise VimPressFailedGetMkd("The attachment URL was found but was unable to be read.")
 
@@ -375,8 +382,8 @@ def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
     assert len(attach_name) > 0, "attach_name 0 length error."
 
     sys.stdout.write("Markdown file uploading ... ")
-    result = g_data.xmlrpc.new_media_object(dict(name = attach_name, type = "text/plain", bits = bits, 
-                    overwrite = overwrite))
+    result = g_data.xmlrpc.new_media_object(dict(name = attach_name, 
+                type = "text/plain", bits = bits, overwrite = overwrite))
     sys.stdout.write("%s\n" % result["file"])
     return result
 
@@ -555,12 +562,13 @@ def blog_edit(edit_type, post_id):
 
     try:
         attach = blog_get_mkd_attachment(content)
-        if "mkd_rawtext" in attach:
-            meta_dict['editformat'] = "Markdown"
-            meta_dict['textattach'] = attach["mkd_name"]
-            content = attach["mkd_rawtext"]
     except VimPressFailedGetMkd:
         pass
+    else:
+        assert "mkd_rawtext" in attach, "Something goes wrong, key 'mkd_rawtext' not attached."
+        meta_dict['editformat'] = "Markdown"
+        meta_dict['textattach'] = attach["mkd_name"]
+        content = attach["mkd_rawtext"]
 
     blog_fill_meta_area(meta_dict)
     meta = blog_meta_parse()
@@ -582,13 +590,8 @@ def blog_delete(edit_type, post_id):
     """
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
-
-    if edit_type.lower() == "post":
-        deleted = g_data.xmlrpc.delete_post(post_id)
-    else:
-        deleted = g_data.xmlrpc.delete_page(post_id)
-
-    assert deleted, "There was a problem deleting the %s.\n" % edit_type
+    deleted = getattr(g_data.xmlrpc, "delete_" + edit_type)(post_id)
+    assert deleted is True, "There was a problem deleting the %s.\n" % edit_type
     sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
 
     blog_list(edit_type)
@@ -756,13 +759,9 @@ def blog_preview(pub = "local"):
             html_preview(html, meta)
         else:
             html_preview(rawtext, meta)
-    elif pub == "publish" or pub == "draft":
+    elif pub in ("publish", "draft"):
         meta = blog_save(pub)
-        if meta["edittype"] == "page":
-            prev_url = "%s?pageid=%s&preview=true" % (g_data.blog_url, meta["strid"])
-        else:
-            prev_url = "%s?p=%s&preview=true" % (g_data.blog_url, meta["strid"])
-        webbrowser.open(prev_url)
+        webbrowser.open("%s?p=%s&preview=true" % (g_data.blog_url, meta["strid"]))
         if pub == "draft":
             sys.stdout.write("\nYou have to login in the browser to preview the post when save as draft.")
     else:
