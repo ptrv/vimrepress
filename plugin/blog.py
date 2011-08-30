@@ -64,8 +64,10 @@ class DataObject(object):
 
     blog_username = property(lambda self: self.xmlrpc.username)
     blog_url = property(lambda self: self.xmlrpc.blog_url)
+    conf_index = property(lambda self:self.__conf_index)
 
-    def __set_conf_index(self, index):
+    @conf_index.setter
+    def conf_index(self, index):
         try:
             index = int(index)
         except ValueError:
@@ -83,9 +85,9 @@ class DataObject(object):
 
         self.__xmlrpc = None
 
-    conf_index = property(lambda self:self.__conf_index, __set_conf_index)
 
-    def __get_xmlrpc(self):
+    @property
+    def xmlrpc(self):
         if self.__xmlrpc is None:
             conf_index = self.conf_index
             config = self.config[conf_index]
@@ -114,17 +116,14 @@ class DataObject(object):
             sys.stdout.write("done.\n")
         return self.__xmlrpc
 
-    xmlrpc = property(__get_xmlrpc)
-
-    def __get_config(self):
+    @property
+    def config(self):
         if self.__config is None:
             try:
                 self.__config = vim.eval("VIMPRESS")
             except vim.error:
                 raise VimPressException("Could not find vimpress configuration. Please read ':help vimpress' for more information.")
         return self.__config
-
-    config = property(__get_config)
 
 class wp_xmlrpc(object):
 
