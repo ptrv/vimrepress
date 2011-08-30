@@ -131,11 +131,11 @@ class wp_xmlrpc(object):
         self.blog_url = blog_url
         self.username = username
         self.password = password
-        rpc_url = os.path.join(blog_url, "xmlrpc.php")
-        self.mw_api = xmlrpclib.ServerProxy(rpc_url).metaWeblog
-        self.wp_api = xmlrpclib.ServerProxy(rpc_url).wp
-        self.mt_api = xmlrpclib.ServerProxy(rpc_url).mt
-        self.demo_api = xmlrpclib.ServerProxy(rpc_url).demo
+        p = xmlrpclib.ServerProxy(os.path.join(blog_url, "xmlrpc.php"))
+        self.mw_api = p.metaWeblog
+        self.wp_api = p.wp
+        self.mt_api = p.mt
+        self.demo_api = p.demo
 
         assert self.demo_api.sayHello() == "Hello!", "XMLRPC Error with communication with '%s'@'%s'" % \
                 (username, blog_url)
