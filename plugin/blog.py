@@ -535,7 +535,10 @@ def blog_edit(edit_type, post_id):
             strid = str(post_id), 
             title = data["title"].encode("utf-8"), 
             slug = data["wp_slug"].encode("utf-8"))
-    content = (data["mt_text_more"] if "mt_text_more" in data else data["description"]).encode("utf-8")
+    content = data["description"]
+    if "mt_text_more" in data:
+        content += '<!--more-->' + data["mt_text_more"]
+    content = content.encode("utf-8")
 
     if edit_type.lower() == "post":
         meta_dict["cats"] = ",".join(data["categories"]).encode("utf-8") 
