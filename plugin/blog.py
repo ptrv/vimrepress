@@ -152,9 +152,6 @@ class wp_xmlrpc(object):
     delete_post = lambda self, post_id: self.mw_api.deletePost('', post_id, self.username,
             self.password, '') 
 
-    get_recent_post = lambda self, retrive_count = 0: self.mw_api.getRecentPosts('',
-            self.username, self.password, retrive_count)
-
     get_recent_post_titles = lambda self, retrive_count = 0: self.mt_api.getRecentPostTitles('',
             self.username, self.password, retrive_count)
 
@@ -163,13 +160,7 @@ class wp_xmlrpc(object):
     new_media_object = lambda self, object_struct: self.mw_api.newMediaObject('', self.username,
             self.password, object_struct)
 
-    new_page = lambda self, post_struct, is_publish: self.wp_api.newPage('',
-            self.username, self.password, post_struct, is_publish)
-
     get_page = lambda self, page_id: self.wp_api.getPage('', page_id, self.username, self.password) 
-
-    edit_page = lambda self, page_id, post_struct, is_publish: self.wp_api.editPage('', page_id,
-            self.username, self.password, post_struct, is_publish)
 
     delete_page = lambda self, page_id: self.wp_api.deletePage('',
             self.username, self.password, page_id) 
@@ -343,7 +334,7 @@ def blog_get_mkd_attachment(post):
             raise VimPressFailedGetMkd("Attached markdown not found.")
         attach.update(data.groupdict())
         attach["mkd_rawtext"] = urllib2.urlopen(attach["mkd_url"]).read()
-    except IOError:
+    except (IOError, ValueError):
         raise VimPressFailedGetMkd("The attachment URL was found but was unable to be read.")
 
     return attach
@@ -461,17 +452,14 @@ def blog_save(pub = "draft"):
                 "Fail to work with edit type %s " % edit_type)
 
     post_struct = dict(title = meta["title"], wp_slug = meta["slug"], 
-                    description = text)
+                    description = text, post_type = edit_type)
     if edit_type == "post":
         post_struct.update(categories = meta["cats"].split(','), 
                         mt_keywords = meta["tags"].split(','))
 
     # New posts
     if strid == '':
-        if edit_type == "post":
-            strid = g_data.xmlrpc.new_post(post_struct, is_publish)
-        else:
-            strid = g_data.xmlrpc.new_page(post_struct, is_publish)
+        strid = g_data.xmlrpc.new_post(post_struct, is_publish)
 
         meta["strid"] = strid
 
@@ -496,10 +484,7 @@ def blog_save(pub = "draft"):
 
     # Old posts
     else:
-        if edit_type == "post":
-            g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
-        elif edit_type == "page":
-            g_data.xmlrpc.edit_page(strid, post_struct, is_publish)
+        g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
 
         notify = "%s edited and %s.   ID=%s" % \
                 (edit_type.capitalize(), "published" if is_publish else "saved as a draft", strid)
@@ -550,7 +535,7 @@ def blog_edit(edit_type, post_id):
             strid = str(post_id), 
             title = data["title"].encode("utf-8"), 
             slug = data["wp_slug"].encode("utf-8"))
-    content = data["description"].encode("utf-8")
+    content = (data["mt_text_more"] if "mt_text_more" in data else data["description"]).encode("utf-8")
 
     if edit_type.lower() == "post":
         meta_dict["cats"] = ",".join(data["categories"]).encode("utf-8") 
@@ -643,10 +628,10 @@ def blog_list_on_key_press(action, edit_type):
 
 def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
-        assert g_data.posts_max == -1, "No data allowed to append any more."
         current_posts = len(vim.current.buffer) - 1
 
         if not (current_posts == 0 and len(g_data.posts_titles) > 0):
+            assert g_data.posts_max == -1, "No data allowed to append any more."
             retrive_count = int(count) + current_posts
             g_data.posts_titles = g_data.xmlrpc.get_recent_post_titles(retrive_count)
             len_allposts = len(g_data.posts_titles)
