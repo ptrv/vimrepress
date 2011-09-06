@@ -2,7 +2,7 @@
 
 
 TEMP_DIR=/tmp/vimpress_relase
-REV=`hg log -r tip|grep -e "^changeset"|awk '{print $2}'|tr ':' '_'`
+REV=`hg summary|grep -e "^parent"|awk '{print $2}'|tr ':' '_'`
 BRANCH=`hg branch`
 hg archive $TEMP_DIR
 cd $TEMP_DIR/plugin
