@@ -59,8 +59,6 @@ class DataObject(object):
 
     view = 'edit'
     vimpress_temp_dir = ''
-    posts_max = -1
-    posts_titles = []
 
     blog_username = property(lambda self: self.xmlrpc.username)
     blog_url = property(lambda self: self.xmlrpc.blog_url)
@@ -91,7 +89,8 @@ class DataObject(object):
         if self.__xmlrpc is None:
             conf_index = self.conf_index
             config = self.config[conf_index]
-            if conf_index not in config:
+
+            if "xmlrpc_obj" not in config:
                 try:
                     blog_username = config['username']
                     blog_password = config.get('password', '')
@@ -101,8 +100,7 @@ class DataObject(object):
                 sys.stdout.write("Connecting to '%s' ... " % blog_url)
                 if blog_password == '':
                    blog_password = vim_input("Enter password for %s" % blog_url, True)
-                self.__xmlrpc = wp_xmlrpc(blog_url, blog_username, blog_password)
-                config["xmlrpc_obj"] = self.xmlrpc
+                config["xmlrpc_obj"] = wp_xmlrpc(blog_url, blog_username, blog_password)
 
             self.__xmlrpc = config["xmlrpc_obj"]
 
@@ -140,6 +138,20 @@ class wp_xmlrpc(object):
         assert self.demo_api.sayHello() == "Hello!", "XMLRPC Error with communication with '%s'@'%s'" % \
                 (username, blog_url)
 
+        self.cache_reset()
+
+    def cache_reset(self):
+        self.__cache_post_titles = []
+        self.__post_title_max = False
+
+    def cache_remove_post(self, postid):
+        for p in self.__cache_post_titles:
+            if p["postid"] == str(postid):
+                self.__cache_post_titles.remove(p)
+                break
+
+    is_reached_title_max = property(lambda self: self.__post_title_max)
+
     new_post = lambda self, post_struct, is_publish: self.mw_api.newPost('',
             self.username, self.password, post_struct, is_publish)
 
@@ -152,8 +164,16 @@ class wp_xmlrpc(object):
     delete_post = lambda self, post_id: self.mw_api.deletePost('', post_id, self.username,
             self.password, '') 
 
-    get_recent_post_titles = lambda self, retrive_count = 0: self.mt_api.getRecentPostTitles('',
-            self.username, self.password, retrive_count)
+    def get_recent_post_titles(self, retrive_count = 0):
+        if retrive_count > len(self.__cache_post_titles) and not self.is_reached_title_max:
+            self.__cache_post_titles = self.mt_api.getRecentPostTitles('',
+                    self.username, self.password, retrive_count)
+            if len(self.__cache_post_titles) < retrive_count:
+                self.__post_title_max = True
+
+        return self.__cache_post_titles
+
+
 
     get_categories = lambda self:self.mw_api.getCategories('', self.username, self.password)
 
@@ -218,8 +238,7 @@ def view_switch(view = "", assert_view = "", reset = False):
                     kw["refresh_list"] = True
 
             if reset:
-                g_data.posts_max = -1
-                g_data.posts_titles = []
+                g_data.xmlrpc.cache_reset()
 
             if view != '':
                 #Switching view
@@ -568,7 +587,7 @@ def blog_edit(edit_type, post_id):
         if vim.eval("mapcheck('%s')" % v):
             vim.command('unmap <buffer> %s' % v)
 
-@view_switch(assert_view = "list", reset = True)
+@view_switch(assert_view = "list")
 def blog_delete(edit_type, post_id):
     """
     Deletes a page or post of specified id.
@@ -580,7 +599,7 @@ def blog_delete(edit_type, post_id):
     deleted = getattr(g_data.xmlrpc, "delete_" + edit_type)(post_id)
     assert deleted is True, "There was a problem deleting the %s.\n" % edit_type
     sys.stdout.write("Deleted %s id %s. \n" % (edit_type, str(post_id)))
-
+    g_data.xmlrpc.cache_remove_post(post_id)
     blog_list(edit_type)
 
 @exception_check
@@ -601,7 +620,7 @@ def blog_list_on_key_press(action, edit_type):
         int(id)
     except ValueError:
         if line.find("More") != -1:
-            assert g_data.posts_max == -1, "No more posts."
+            assert g_data.xmlrpc.is_reached_title_max is False, "No more posts."
             vim.command("setl modifiable")
             del vim.current.buffer[len(vim.current.buffer) - 1:]
             append_blog_list(edit_type)
@@ -632,19 +651,11 @@ def blog_list_on_key_press(action, edit_type):
 def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
     if edit_type.lower() == "post":
         current_posts = len(vim.current.buffer) - 1
-
-        if not (current_posts == 0 and len(g_data.posts_titles) > 0):
-            assert g_data.posts_max == -1, "No data allowed to append any more."
-            retrive_count = int(count) + current_posts
-            g_data.posts_titles = g_data.xmlrpc.get_recent_post_titles(retrive_count)
-            len_allposts = len(g_data.posts_titles)
-
-             #Reached the end
-            if len_allposts < current_posts + int(count):
-                g_data.posts_max = len_allposts
+        retrive_count = int(count) + current_posts
+        posts_titles = g_data.xmlrpc.get_recent_post_titles(retrive_count)
 
         vim.current.buffer.append(\
-                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in g_data.posts_titles[current_posts:]])
+                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in posts_titles[current_posts:]])
     else:
         pages = g_data.xmlrpc.get_page_list()
         vim.current.buffer.append(\
@@ -810,7 +821,7 @@ def blog_guess_open(what):
 
 @exception_check
 @vim_encoding_check
-@view_switch(reset = True) 
+@view_switch()
 def blog_config_switch(index = -1, refresh_list = False):
     """
     Switches the blog to the 'index' of the configuration array.
