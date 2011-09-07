@@ -1,7 +1,7 @@
 #!/usr/bin/env python2
 
 
-import urllib, urllib2, xmlrpclib, sys, re, os, mimetypes, webbrowser, tempfile, time
+import urllib2, xmlrpclib, re, os, sys
 
 class VimPressException(Exception):
     pass
@@ -123,16 +123,14 @@ def blog_get_mkd_attachment(post):
 
     return attach
 
-def blog_update(post, edit_type, new_content, attach):
+def blog_update(post, content, attach):
+
+    lead = content.rindex("<!-- ")
+    new_content = content[:lead]
+
+    edit_type = "page" if "page_id" in post else "post"
 
     markdown_text = attach["mkd_rawtext"]
-
-    content = data["description"]
-    if "mt_text_more" in data:
-        content += '<!--more-->' + data["mt_text_more"]
-    content = content.encode("utf-8")
-    lead = content.rindex("<!-- ")
-    content = content[:lead]
 
     is_publish = (post.get(edit_type + "_status") == "publish")
 
@@ -141,44 +139,114 @@ def blog_update(post, edit_type, new_content, attach):
     except KeyError:
         strid = post["page_id"]
 
-    mkd_text_field = dict(key = "mkd_text", value = markdown_text)
+    if len(new_content.strip()) == 0:
+        new_content = 'Empty Post'
 
-    post_struct = dict(post_type = edit_type,
-            description = new_content,
-            custom_fields = [mkd_text_field]
-            )
+    post_struct = dict( post_type = edit_type, description = new_content )
 
-    if len(post["custom_fields"]) > 0:
-        mkd_text_field.update(id = strid)
-        
+    if len(markdown_text) > 0:
+        mkd_text_field = dict(key = "mkd_text", value = markdown_text)
+        for f in post["custom_fields"]:
+            if f["key"] == "mkd_text":
+                mkd_text_field.update(id = strid)
+        post_struct.update(custom_fields = [mkd_text_field])
 
-    g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
+    for attr in ("title", "wp_slug", "categories", "mt_keywords"):
+        post_struct[attr] = post.get(attr, '')
+
+    try:
+        g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
+    except xmlrpclib.Fault, e:
+        import pdb;pdb.set_trace()
+        raise
 
 
+def post_struct_get_content(data):
+    content = data["description"]
+    post_more = data.get("mt_text_more", '')
+    page_more = data.get("text_more", '')
 
+    if len(post_more) > 0:
+        content += '<!--more-->' + post_more
+    elif len(page_more) > 0:
+        content += '<!--more-->' + page_more
 
-URL = "http://local.blog"
-USER = "admin"
-PASS = "123456"
+#    content = content.encode("utf-8")
+
+    return content
+
+def loop_proccess_posts(posts, edit_type):
+    for post in posts:
+        if edit_type == "page":
+            print u"%(page_id)s\t%(page_title)s" % post, '... ',
+            sys.stdout.flush()
+            page_id = post["page_id"].encode("utf-8")
+            data = g_data.xmlrpc.get_page(page_id)
+        elif edit_type == "post":
+            print u"%(postid)s\t%(title)s  ... " % post, 
+            sys.stdout.flush()
+            post_id = post["postid"].encode("utf-8")
+            data = g_data.xmlrpc.get_post(post_id)
+
+        content = post_struct_get_content(data)
+        try:
+            attach = blog_get_mkd_attachment(content)
+        except VimPressFailedGetMkd:
+            print "No Markdown Attached."
+        else:
+            blog_update(data, content, attach)
+            attachements_proccessed.append(attach["mkd_name"])
+            print "Updated."
+
+    print "\n\n"
+
+print """
+                          WARNNING
+#########################################################
+Warnning: Backup your wordpress database before procceed.
+Warnning: Backup your wordpress database before procceed.
+Warnning: Backup your wordpress database before procceed.
+#########################################################
+
+This script is designed to convert older version of vimpress
+edited posts of wordpress into newer custom fields data, 
+I tested it works flawlessly to my own blog, but I don't 
+guarantee no exceptions in other circumstance, I don't 
+respons for any data lost if you used this script without 
+DATABASE BACKUP.
+
+BACKUP !!
+
+"""
+
+URL = raw_input("Blog URL: ")
+USER = raw_input("USERNAME: ")
+PASS = raw_input("PASSWORD: ")
 
 g_data = DataObject()
 g_data.xmlrpc = wp_xmlrpc(URL, USER, PASS)
 
-print "Upgrade pages ..."
-pages = g_data.xmlrpc.get_page_list()
+attachements_proccessed = []
 
-for page in pages:
-    print u"%(page_id)s\t%(page_title)s" % page, '....',
-    page_id = page["page_id"].encode("utf-8")
-    data = g_data.xmlrpc.get_page(page_id)
+i = raw_input("Upgrade pages ?[Y/n]")
+if i.lower() == 'y' or i == '':
+    print "Upgrade pages ..." 
+    pages = g_data.xmlrpc.get_page_list()
+    loop_proccess_posts(pages, "page")
 
-    try:
-        attach = blog_get_mkd_attachment(content)
-    except VimPressFailedGetMkd:
-        print "No Markdown Attached."
-    else:
-        blog_update(data, "page", content, mkd_rawtext)
-        print "Updated."
+i = raw_input("Upgrade Posts ?[Y/n]")
+if i.lower() == 'y' or i == '':
+    count = raw_input("How many recent posts to retrive ?[100]")
+    if count == '':
+        count = '100'
+    assert isinstance(int(count), int), "input a integer please."
+    posts = g_data.xmlrpc.get_recent_post_titles(count)
+    loop_proccess_posts(posts, "post")
 
+if len(attachements_proccessed) > 0:
+    print "All Done. Congras.\n"
+    print "You may now delete this attachments from wordpress panel.\n\n"
+    for a in attachements_proccessed:
+        print a
 
 
