@@ -31,8 +31,10 @@
 " VimRepress 
 "    - A mod of a mod of a mod of Vimpress.   
 "    - A vim plugin fot writting your wordpress blog.
+"    - Write with Markdown, control posts format precisely.
+"    - Stores Markdown rawtext in wordpress custom fields.
 "
-" Version:	2.3.0
+" Version:	3.0.0
 "
 " Configure: Add blog configure into your .vimrc (password optional)
 "
