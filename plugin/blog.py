@@ -32,9 +32,6 @@ def exception_check(func):
 class VimPressException(Exception):
     pass
 
-class VimPressFailedGetMkd(VimPressException):
-    pass
-
 class DataObject(object):
 
     #CONST
@@ -48,9 +45,8 @@ class DataObject(object):
     LIST_VIEW_KEY_MAP = dict(enter = "<enter>", delete = "<delete>")
     DEFAULT_META = dict(strid = "", title = "", slug = "", 
                         cats = "", tags = "", editformat = "Markdown", 
-                        edittype = "post", textattach = '')
-    TAG_STRING = "<!-- #VIMPRESS_TAG# %(url)s %(file)s -->"
-    TAG_RE = re.compile(TAG_STRING % dict(url = '(?P<mkd_url>\S+)', file = '(?P<mkd_name>\S+)'))
+                        edittype = "post") 
+    CUSTOM_FIELD_KEY = "mkd_text"
 
     #Temp variables.
     __xmlrpc = None
@@ -172,8 +168,6 @@ class wp_xmlrpc(object):
                 self.__post_title_max = True
 
         return self.__cache_post_titles
-
-
 
     get_categories = lambda self:self.mw_api.getCategories('', self.username, self.password)
 
@@ -319,7 +313,6 @@ def blog_fill_meta_area(meta):
 "%(mid)s
 "EditType   : %(edittype)s
 "EditFormat : %(editformat)s
-"TextAttach : %(textattach)s
 "%(ed)s""", 
         page = \
 """"%(bg)s
@@ -329,7 +322,6 @@ def blog_fill_meta_area(meta):
 "%(mid)s
 "EditType   : %(edittype)s
 "EditFormat : %(editformat)s
-"TextAttach : %(textattach)s
 "%(ed)s""") 
 
     if meta["edittype"] not in ("post", "page"):
@@ -338,26 +330,6 @@ def blog_fill_meta_area(meta):
     meta = meta_text.split('\n')
     vim.current.buffer[0] = meta[0]
     vim.current.buffer.append(meta[1:])
-
-def blog_get_mkd_attachment(post):
-    """
-    Attempts to find a vimpress tag containing a URL for a markdown attachment and parses it.
-    @params post - the content of a post
-    @returns a dictionary with the attachment's content and URL
-    """
-    attach = dict()
-    try:
-        lead = post.rindex("<!-- ")
-        data = re.search(g_data.TAG_RE, post[lead:])
-        if data is None:
-            raise VimPressFailedGetMkd("Attached markdown not found.")
-        attach.update(data.groupdict())
-        attach["mkd_rawtext"] = urllib2.urlopen(attach["mkd_url"]).read()
-    except (IOError, ValueError):
-        raise VimPressFailedGetMkd("The attachment URL was found but was unable to be read.")
-
-    return attach
-
 
 def blog_wise_open_view():
     """
@@ -373,28 +345,6 @@ def blog_wise_open_view():
         vim.command(":new")
     vim.command('setl syntax=blogsyntax')
     vim.command('setl completefunc=Completable')
-
-def blog_upload_markdown_attachment(post_id, attach_name, mkd_rawtext):
-    """
-    Uploads the markdown attachment.
-    @params post_id     - the id of the post or page
-            attach_name - the name of the attachment
-            mkd_rawtext - the Markdown content
-    """
-    bits = xmlrpclib.Binary(mkd_rawtext)
-
-    # New Post, or post without a attachtext info
-    overwrite = (post_id != '' and attach_name != '')
-    if not overwrite:
-        attach_name = "vimpress_%s_mkd.txt" % hex(int(time.time()))[2:]
-
-    assert len(attach_name) > 0, "attach_name 0 length error."
-
-    sys.stdout.write("Markdown file uploading ... ")
-    result = g_data.xmlrpc.new_media_object(dict(name = attach_name, 
-                type = "text/plain", bits = bits, overwrite = overwrite))
-    sys.stdout.write("%s\n" % result["file"])
-    return result
 
 @vim_encoding_check
 def vim_input(message = 'input', secret = False):
@@ -445,33 +395,26 @@ def blog_save(pub = "draft"):
     """
     if pub not in ("publish", "draft"):
         raise VimPressException(":BlogSave draft|publish")
-
     is_publish = (pub == "publish")
-
     meta = blog_meta_parse()
     rawtext = '\n'.join(vim.current.buffer[meta["post_begin"]:])
-
-    #Translate markdown and upload as attachment 
-    if meta["editformat"].strip().lower() == "markdown":
-        attach = blog_upload_markdown_attachment(
-                meta["strid"], meta["textattach"], rawtext)
-        meta["textattach"] = attach["file"]
-        text = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
-
-        # Add tag string at the last of the post.
-        text += g_data.TAG_STRING % attach
-    else:
-        text = rawtext
-
-    edit_type = meta["edittype"]
     strid = meta["strid"] 
-
+    edit_type = meta["edittype"]
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException(
                 "Fail to work with edit type %s " % edit_type)
 
-    post_struct = dict(title = meta["title"], wp_slug = meta["slug"], 
-                    description = text, post_type = edit_type)
+    post_struct = dict(title = meta["title"], wp_slug = meta["slug"], post_type = edit_type)
+    mkd_text_field = {}
+
+    #Translate markdown and save in custom fields.
+    if meta["editformat"].strip().lower() == "markdown":
+        post_struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
+        mkd_text_field.update(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)
+        post_struct["custom_fields"] = [mkd_text_field]
+    else:
+        post_struct["description"] = rawtext
+
     if edit_type == "post":
         post_struct.update(categories = meta["cats"].split(','), 
                         mt_keywords = meta["tags"].split(','))
@@ -503,6 +446,8 @@ def blog_save(pub = "draft"):
 
     # Old posts
     else:
+        if mkd_text_field.has_key("key"):
+            mkd_text_field["id"] = strid
         g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
 
         notify = "%s edited and %s.   ID=%s" % \
@@ -566,15 +511,11 @@ def blog_edit(edit_type, post_id):
     meta_dict['editformat'] = "HTML"
     meta_dict['edittype'] = edit_type
 
-    try:
-        attach = blog_get_mkd_attachment(content)
-    except VimPressFailedGetMkd:
-        pass
-    else:
-        assert "mkd_rawtext" in attach, "Something goes wrong, key 'mkd_rawtext' not attached."
-        meta_dict['editformat'] = "Markdown"
-        meta_dict['textattach'] = attach["mkd_name"]
-        content = attach["mkd_rawtext"]
+    for field in data["custom_fields"]:
+        if field["key"] == g_data.CUSTOM_FIELD_KEY:
+            meta_dict['editformat'] = "Markdown"
+            content = field["value"]
+            break
 
     blog_fill_meta_area(meta_dict)
     meta = blog_meta_parse()
