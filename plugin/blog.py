@@ -79,7 +79,6 @@ class DataObject(object):
 
         self.__xmlrpc = None
 
-
     @property
     def xmlrpc(self):
         if self.__xmlrpc is None:
