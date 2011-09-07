@@ -123,9 +123,19 @@ def blog_get_mkd_attachment(post):
 
     return attach
 
-def blog_update(post, edit_type, new_content, markdown_text):
+def blog_update(post, edit_type, new_content, attach):
+
+    markdown_text = attach["mkd_rawtext"]
+
+    content = data["description"]
+    if "mt_text_more" in data:
+        content += '<!--more-->' + data["mt_text_more"]
+    content = content.encode("utf-8")
+    lead = content.rindex("<!-- ")
+    content = content[:lead]
 
     is_publish = (post.get(edit_type + "_status") == "publish")
+
     try:
         strid = post["postid"]
     except KeyError:
@@ -140,6 +150,7 @@ def blog_update(post, edit_type, new_content, markdown_text):
 
     if len(post["custom_fields"]) > 0:
         mkd_text_field.update(id = strid)
+        
 
     g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
 
@@ -160,21 +171,12 @@ for page in pages:
     print u"%(page_id)s\t%(page_title)s" % page, '....',
     page_id = page["page_id"].encode("utf-8")
     data = g_data.xmlrpc.get_page(page_id)
-    content = data["description"]
-    if "mt_text_more" in data:
-        content += '<!--more-->' + data["mt_text_more"]
-    content = content.encode("utf-8")
 
     try:
         attach = blog_get_mkd_attachment(content)
     except VimPressFailedGetMkd:
         print "No Markdown Attached."
     else:
-        mkd_rawtext = attach["mkd_rawtext"]
-
-        lead = content.rindex("<!-- ")
-        content = content[lead:]
-
         blog_update(data, "page", content, mkd_rawtext)
         print "Updated."
 
