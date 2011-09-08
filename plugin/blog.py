@@ -498,28 +498,29 @@ def blog_edit(edit_type, post_id):
             strid = str(post_id), 
             title = data["title"].encode("utf-8"), 
             slug = data["wp_slug"].encode("utf-8"))
-    content = data["description"]
-    post_more = data.get("mt_text_more", '')
-    page_more = data.get("text_more", '')
-
-    if len(post_more) > 0:
-        content += '<!--more-->' + post_more
-    elif len(page_more) > 0:
-        content += '<!--more-->' + page_more
-
-    content = content.encode("utf-8")
 
     if edit_type.lower() == "post":
         meta_dict["cats"] = ",".join(data["categories"]).encode("utf-8") 
         meta_dict["tags"] = data["mt_keywords"].encode("utf-8")
 
+     #Normal HTML content, appending '<!--more--> tag'
+    content = data["description"]
+    post_more = data.get("mt_text_more", '')
+    page_more = data.get("text_more", '')
+    if len(post_more) > 0:
+        content += '<!--more-->' + post_more
+    elif len(page_more) > 0:
+        content += '<!--more-->' + page_more
+    content = content.encode("utf-8")
+
     meta_dict['editformat'] = "HTML"
     meta_dict['edittype'] = edit_type
 
+     #Use Markdown text if exists in custom fields
     for field in data["custom_fields"]:
         if field["key"] == g_data.CUSTOM_FIELD_KEY:
             meta_dict['editformat'] = "Markdown"
-            content = field["value"]
+            content = field["value"].encode('utf-8')
             break
 
     blog_fill_meta_area(meta_dict)
