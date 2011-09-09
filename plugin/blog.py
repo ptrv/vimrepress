@@ -180,6 +180,58 @@ class wp_xmlrpc(object):
 
     get_page_list = lambda self: self.wp_api.getPageList('', self.username, self.password) 
 
+
+class wp_posts(object):
+
+    class single_post(object):
+        pass
+
+    class single_page(object):
+        pass
+
+
+    def __init__(self):
+        self.buffer_meta = dict()
+        self.edit_type = ""
+
+    def update_post_from_buffer(self):
+        start = 0
+        while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
+            start +=1
+
+        end = start + 1
+        while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
+            if not vim.current.buffer[end].startswith('"===='):
+                line = vim.current.buffer[end][1:].strip().split(":")
+                k, v = line[0].strip().lower(), ':'.join(line[1:])
+                setattr(self.buffer_meta, k.strip().lower(), v.strip())
+            end += 1
+
+        self.buffer_meta["content"] = '\n'.join(vim.current.buffer[end + 1:])
+
+    def post_struct(self):
+
+        meta = self.buffer_meta
+        struct = dict(title = meta["title"],
+                wp_slug = meta["slug"],
+                post_type = self.edit_type)
+
+        mkd_text_field = {}
+
+        #Translate markdown and save in custom fields.
+        if meta["editformat"].strip().lower() == "markdown":
+            post_struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
+            post_struct["custom_fields"] = [dict(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)]
+        else:
+            post_struct["description"] = rawtext
+
+        if edit_type == "post":
+            post_struct.update(categories = meta["cats"].split(','), 
+                            mt_keywords = meta["tags"].split(','))
+
+
+
+
 #################################################
 # Golbal Variables
 #################################################
