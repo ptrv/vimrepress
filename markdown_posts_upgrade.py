@@ -78,7 +78,7 @@ class wp_xmlrpc(object):
             self.username, self.password) 
 
     edit_post = lambda self, post_id, post_struct, is_publish: self.mw_api.editPost(post_id,
-            self.username, self.password, post_struct, is_publish)
+            self.username, self.password, post_struct )
 
     delete_post = lambda self, post_id: self.mw_api.deletePost('', post_id, self.username,
             self.password, '') 
@@ -128,11 +128,9 @@ def blog_update(post, content, attach):
     lead = content.rindex("<!-- ")
     new_content = content[:lead]
 
-    edit_type = "page" if "page_id" in post else "post"
-
     markdown_text = attach["mkd_rawtext"]
-
-    is_publish = (post.get(edit_type + "_status") == "publish")
+    
+    post_struct = post
 
     try:
         strid = post["postid"]
@@ -142,20 +140,20 @@ def blog_update(post, content, attach):
     if len(new_content.strip()) == 0:
         new_content = 'Empty Post'
 
-    post_struct = dict( post_type = edit_type, description = new_content )
+    post_struct["description"] = new_content
 
     if len(markdown_text) > 0:
-        mkd_text_field = dict(key = "mkd_text", value = markdown_text)
-        for f in post["custom_fields"]:
-            if f["key"] == "mkd_text":
-                mkd_text_field.update(id = strid)
-        post_struct.update(custom_fields = [mkd_text_field])
-
-    for attr in ("title", "wp_slug", "categories", "mt_keywords"):
-        post_struct[attr] = post.get(attr, '')
+        updated = False
+        for f in post_struct["custom_fields"]:
+            if f["key"] == g_data.CUSTOM_FIELD_KEY:
+                f["value"] = markdown_text
+                updated = True
+                break
+        if not updated:
+            post_struct["custom_fields"].append(dict(key = g_data.CUSTOM_FIELD_KEY, value = markdown_text))
 
     try:
-        g_data.xmlrpc.edit_post(strid, post_struct, is_publish)
+        g_data.xmlrpc.edit_post(strid, post_struct )
     except xmlrpclib.Fault, e:
         import pdb;pdb.set_trace()
         raise
@@ -188,6 +186,7 @@ def loop_proccess_posts(posts, edit_type):
             post_id = post["postid"].encode("utf-8")
             data = g_data.xmlrpc.get_post(post_id)
 
+        import ipdb;ipdb.set_trace()
         content = post_struct_get_content(data)
         try:
             attach = blog_get_mkd_attachment(content)
