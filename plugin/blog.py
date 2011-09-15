@@ -25,7 +25,7 @@ def exception_check(func):
 
     return __check
 
-#################################################
+################################################
 # Helper Classes
 #################################################
 
@@ -182,8 +182,66 @@ class wp_xmlrpc(object):
     get_page_list = lambda self: self.wp_api.getPageList('', self.username, self.password) 
 
 
-class Post(object):
+class ContentStruct(object):
 
+    buffer_meta = None
+    post_struct_meta = None
+    META_TEMPLATE = ''
+    MORE_KEY = ''
+
+    def __init__(self, edit_type = ''):
+        self.buffer_meta = dict()
+        self.post_struct_meta = dict()
+        self.edit_type = edit_type
+
+    def update_post_from_buffer(self):
+        start = 0
+        while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
+            start +=1
+
+        end = start + 1
+        while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
+            if not vim.current.buffer[end].startswith('"===='):
+                line = vim.current.buffer[end][1:].strip().split(":")
+                k, v = line[0].strip().lower(), ':'.join(line[1:])
+                setattr(self.buffer_meta, k.strip().lower(), v.strip().decode('utf-8'))
+            end += 1
+
+        self.buffer_meta["content"] = '\n'.join(vim.current.buffer[end + 1:]).decode('utf-8')
+        self.edit_type = self.buffer_meta["edittype"]
+
+    def fill_post_meta_area(self):
+        meta = self.buffer_meta.copy()
+        for k in g_data.DEFAULT_META.keys():
+            if k not in meta:
+                meta[k] = g_data.DEFAULT_META[k]
+        meta.update(g_data.MARKER)
+
+        meta_text = (self.META_TEMPLATE % meta).split('\n')
+        vim.current.buffer[0] = meta_text[0]
+        vim.current.buffer.append(meta_text[1:])
+
+    @property
+    def post_struct(self):
+        return self.post_struct_meta
+
+    @post_struct.setter
+    def post_struct(self, data):
+        assert self.edit_type != '', "Set edit_type first."
+        post_struct = self.post_struct
+        post_struct.update(data)
+
+         #combine splited "more" text.
+        content = post_struct["description"]
+        post_more = post_struct[self.MORE_KEY]
+        if len(post_more) > 0:
+            content += u'<!--more-->' + post_more
+            post_struct[self.MORE_KEY] = ''
+            post_struct["description"] = content
+
+
+
+class Post(object):
 
     MORE_KEY = "mt_text_more"
     EDIT_TYPE = "post"
