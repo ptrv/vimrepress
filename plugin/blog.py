@@ -55,11 +55,29 @@ class DataObject(object):
 
     view = 'edit'
     vimpress_temp_dir = ''
-    current_post = None
+#    current_post = None
+
 
     blog_username = property(lambda self: self.xmlrpc.username)
     blog_url = property(lambda self: self.xmlrpc.blog_url)
     conf_index = property(lambda self:self.__conf_index)
+
+    __current_post_id = ''
+    post_cache = dict()
+
+    @property
+    def current_post(self):
+        if '' not in self.post_cache:
+            self.post_cache[''] = ContentStruct('post')
+        return self.post_cache.get(self.__current_post_id)
+
+    @current_post.setter
+    def current_post(self, data):
+        id = data.id
+        if id != '' and '' in self.post_cache:
+            del self.post_cache['']
+        self.__current_post_id = id
+        self.post_cache[id] = data
 
     @conf_index.setter
     def conf_index(self, index):
@@ -291,7 +309,7 @@ class PostFormatter(object):
             id = ps["postid"] 
             g_data.xmlrpc.edit_post(id, ps)
 
-    id = property(lambda self:self.post_struct_meta["postid"])
+    id = property(lambda self:self.post_struct_meta.get("postid", ""))
 
 
 class PageFormatter(PostFormatter):
@@ -338,36 +356,49 @@ class PageFormatter(PostFormatter):
             id = ps["page_id"] 
             g_data.xmlrpc.edit_post(id, ps)
 
-    id = property(lambda self:self.post_struct_meta["page_id"])
+    id = property(lambda self:self.post_struct_meta.get("page_id", ""))
 
 class ContentStruct(object):
 
     buffer_meta = None
     post_struct_meta = None
-    formatter = None
-    META_TEMPLATE = ''
-    MORE_KEY = ''
     EDIT_TYPE = ''
-    POST_BEGIN = property(lambda self:self.formatter.POST_BEGIN)
+    META_TEMP = dict(post = \
+""""%(bg)s
+"StrID : %(strid)s
+"Title : %(title)s
+"Slug  : %(slug)s
+"Cats  : %(cats)s
+"Tags  : %(tags)s
+"%(mid)s
+"EditType   : %(edittype)s
+"EditFormat : %(editformat)s
+"%(ed)s""", page = \
+""""%(bg)s
+"StrID : %(strid)s
+"Title : %(title)s
+"Slug  : %(slug)s
+"%(mid)s
+"EditType   : %(edittype)s
+"EditFormat : %(editformat)s
+"%(ed)s""")
+
+    POST_BEGIN = property(lambda self:len(self.META_TEMPLATE[self.EDIT_TYPE].split('\n')))
 
     def __init__(self, edit_type = None):
-        self.buffer_meta = dict()
-        self.post_struct_meta = dict()
-
-        if edit_type is None:
-            self.update_post_from_buffer()
-            edit_type = self.buffer_meta["edittype"]
 
         assert edit_type in ("post", "page"), "Type Error, " + edit_type
-
-        if edit_type == "post":
-            self.formatter = PostFormatter(self)
-        else:
-            self.formatter = PageFormatter(self)
-
         self.EDIT_TYPE = edit_type
+        self.buffer_meta = dict(strid = '')
+        self.post_struct_meta = dict(title = '',
+                wp_slug = '',
+                post_type = edit_type,
+                description = '',
+                custom_fields = [],
+                post_status = 'draft')
 
-    def update_post_from_buffer(self):
+
+    def parse_buffer(self):
         start = 0
         while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
             start +=1
@@ -380,34 +411,31 @@ class ContentStruct(object):
                 self.buffer_meta[k.strip().lower()] = v.strip().decode('utf-8')
             end += 1
 
+        if self.EDIT_TYPE != self.buffer_meta["edittype"]:
+            self.EDIT_TYPE = self.buffer_meta["edittype"]
+
         self.buffer_meta["content"] = '\n'.join(vim.current.buffer[end + 1:]).decode('utf-8')
-        self.edit_type = self.buffer_meta["edittype"]
 
-        if self.formatter is not None:
-            self.formatter.update_post_struct()
-
-    def fill_post_meta_area(self):
+    def fill_buffer(self):
         meta = self.buffer_meta.copy()
+        meta_temp = self.META_TEMP[self.EDIT_TYPE]
         for k in g_data.DEFAULT_META.keys():
             if k not in meta:
                 meta[k] = g_data.DEFAULT_META[k]
         meta.update(g_data.MARKER)
 
-        meta_text = (self.META_TEMPLATE % meta).split('\n')
+        meta_text = (meta_temp % meta).split('\n')
         vim.current.buffer[0] = meta_text[0]
         vim.current.buffer.append(meta_text[1:])
         content = self.buffer_meta.get("content", '')
         vim.current.buffer.append(content.split('\n'))
 
-    def update_meta_area(self):
+    def update_buffer_meta(self):
         """
         Updates the meta data region of a blog editing buffer.
         @params **kwargs - keyworded arguments
         """
-
-        self.formatter.update_buffer_meta()
         kw = self.buffer_meta
-
         start = 0
         while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
             start +=1
@@ -419,25 +447,124 @@ class ContentStruct(object):
                 k, v = line[0].strip().lower(), ':'.join(line[1:])
                 if k in kw:
                     new_line = "\"%s: %s" % (line[0], kw[k])
-                    vim.current.buffer[end] = new_line
+                    vim.current.buffer[end] = new_line.encode('utf-8')
             end += 1
 
-    @property
-    def post_struct(self):
-        return self.post_struct_meta
+    def update_from_buffer(self):
+        self.parse_buffer()
 
-    @post_struct.setter
-    def post_struct(self, data):
-        assert self.EDIT_TYPE != '', "Set edit_type first."
-        post_struct = self.post_struct
-        post_struct.update(data)
-        self.formatter.update_buffer_meta()
+        meta = self.buffer_meta
+        struct = self.post_struct_meta
 
-    update_content_by_id = lambda self, id: self.formatter.update_content_by_id(id)
+        struct.update(title = meta["title"],
+                wp_slug = meta["slug"],
+                post_type = "post")
 
-    post_status = property(lambda self:self.post_struct_meta["post_status"], lambda self, d:self.post_struct_meta.update(post_status = d))
+        if self.EDIT_TYPE == "post":
+            struct.update(categories = meta["cats"].split(','), 
+                mt_keywords = meta["tags"].split(','))
 
-    id = property(lambda self: self.formatter.id)
+        rawtext = meta["content"]
+
+        #Translate markdown and save in custom fields.
+        if meta["editformat"].lower() == "markdown":
+            struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
+            updated = False
+            for f in struct["custom_fields"]:
+                if f["key"] == g_data.CUSTOM_FIELD_KEY:
+                    f["value"] = rawtext
+                    updated = True
+                    break
+            if not updated:
+                field = dict(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)
+                struct["custom_fields"].append(field)
+                if meta["strid"] != '':
+                    field["id"] = meta["strid"] 
+        else:
+            struct["description"] = rawtext
+
+    def update_from_post_id(self, id, force_update_cache = False):
+        if (not force_update_cache) and id in g_data.post_cache:
+            self.post_struct_meta = struct = g_data.post_cache[id]
+        else:
+            self.post_struct_meta = struct = getattr(g_data.xmlrpc, "get_" + self.EDIT_TYPE)(id)
+            g_data.post_cache[id] = struct
+
+        meta = dict( editformat = "HTML",
+                title = struct["title"].encode("utf-8"), 
+                slug = struct["wp_slug"].encode("utf-8"))
+
+        if self.EDIT_TYPE == "post":
+            meta.update(strid = str(struct["postid"]),
+            cats = ", ".join(struct["categories"]).encode("utf-8") ,
+            tags = ", ".join(struct["mt_keywords"]).encode("utf-8"))
+            MORE_KEY = "mt_text_more"
+        else:
+            meta.update(strid = str(struct["page_id"]))
+            MORE_KEY = "text_more"
+
+        content = struct["description"]
+
+         #detect more text
+        post_more = struct.get(MORE_KEY, '')
+        if len(post_more) > 0:
+            content += u'<!--more-->' + post_more
+            struct[MORE_KEY] = ''
+            struct["description"] = content
+
+         #Use Markdown text if exists in custom fields
+        for field in struct["custom_fields"]:
+            if field["key"] == g_data.CUSTOM_FIELD_KEY:
+                meta['editformat'] = "Markdown"
+                content = field["value"].encode('utf-8')
+                break
+
+        meta["content"] = content
+
+        self.buffer_meta.update(meta)
+                
+    def save_post(self):
+        ps = self.post_struct_meta
+        if self.EDIT_TYPE == "post":
+            if ps.get("postid", '') == '':
+                id = g_data.xmlrpc.new_post(ps)
+            else:
+                id = ps["postid"] 
+                g_data.xmlrpc.edit_post(id, ps)
+        else:
+            if ps.get("page_id", '') == '':
+                id = g_data.xmlrpc.new_post(ps)
+            else:
+                id = ps["page_id"] 
+                g_data.xmlrpc.edit_post(id, ps)
+
+        self.update_from_post_id(id)
+
+    post_status = property(lambda self:self.post_struct_meta["post_status"])
+
+    @post_status.setter
+    def post_status(self, data):
+        if data is not None:
+            self.post_struct_meta.update(post_status = data)
+
+    id = property(lambda self: self.buffer_meta["strid"])
+
+#    @property
+#    def post_struct(self):
+#        return self.post_struct_meta
+#
+#    @post_struct.setter
+#    def post_struct(self, data):
+#        assert self.EDIT_TYPE != '', "Set edit_type first."
+#        post_struct = self.post_struct
+#        post_struct.update(data)
+#        self.formatter.update_buffer_meta()
+#
+#    update_content_by_id = lambda self, id: self.formatter.update_content_by_id(id)
+#
+#    post_status = property(lambda self:self.post_struct_meta["post_status"], lambda self, d:self.post_struct_meta.update(post_status = d))
+#
+#    id = property(lambda self: self.formatter.id)
 
 #################################################
 # Golbal Variables
@@ -653,12 +780,11 @@ def blog_save(pub = None):
     """
     if pub not in ("publish", "draft", None):
         raise VimPressException(":BlogSave draft|publish")
-
-    cp = g_data.current_post = ContentStruct()
+    cp = g_data.current_post
+    cp.update_from_buffer()
     cp.post_status = pub
-    cp.formatter.update_post_struct()
-    cp.formatter.save_post()
-    cp.update_meta_area()
+    cp.save_post()
+    cp.update_buffer_meta()
     notify = "%s ID=%s saved with status '%s'" % (cp.post_status, cp.id, cp.post_status)
     sys.stdout.write(notify)
     vim.command('setl nomodified')
@@ -676,7 +802,7 @@ def blog_new(edit_type = "post", currentContent = None):
         raise VimPressException("Invalid option: %s " % edit_type)
     blog_wise_open_view()
     g_data.current_post = cp = ContentStruct(edit_type)
-    cp.fill_post_meta_area()
+    cp.fill_buffer()
 
 @view_switch(view = "edit")
 def blog_edit(edit_type, post_id):
