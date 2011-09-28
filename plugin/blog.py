@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import urllib, urllib2, vim, xmlrpclib, sys, re, os, mimetypes, webbrowser, tempfile, time
+import urllib, vim, xmlrpclib, sys, re, os, mimetypes, webbrowser, tempfile 
 try:
     import markdown
 except ImportError:
@@ -45,7 +45,7 @@ class DataObject(object):
     LIST_VIEW_KEY_MAP = dict(enter = "<enter>", delete = "<delete>")
     DEFAULT_META = dict(strid = "", title = "", slug = "", 
                         cats = "", tags = "", editformat = "Markdown", 
-                        edittype = "post") 
+                        edittype = "") 
     CUSTOM_FIELD_KEY = "mkd_text"
 
     #Temp variables.
@@ -68,16 +68,24 @@ class DataObject(object):
     @property
     def current_post(self):
         if '' not in self.post_cache:
-            self.post_cache[''] = ContentStruct('post')
+            self.post_cache[''] = ContentStruct(edit_type = 'post')
         return self.post_cache.get(self.__current_post_id)
 
     @current_post.setter
     def current_post(self, data):
-        id = data.id
-        if id != '' and '' in self.post_cache:
+        post_id = data.post_id
+        if post_id != '' and '' in self.post_cache:
             del self.post_cache['']
-        self.__current_post_id = id
-        self.post_cache[id] = data
+        self.__current_post_id = post_id
+        if not self.post_cache.has_key(post_id):
+            self.post_cache[post_id] = data
+
+    def cached_post_by_id(self, post_id):
+        if self.post_cache.has_key(post_id):
+            p = self.post_cache[post_id]
+        else:
+            self.current_post = p = ContentStruct(edit_type = "post", post_id = post_id)
+        return p
 
     @conf_index.setter
     def conf_index(self, index):
@@ -172,8 +180,8 @@ class wp_xmlrpc(object):
     get_post = lambda self, post_id: self.mw_api.getPost(post_id,
             self.username, self.password) 
 
-    edit_post = lambda self, post_id, post_struct, is_publish: self.mw_api.editPost(post_id,
-            self.username, self.password, post_struct, is_publish)
+    edit_post = lambda self, post_id, post_struct: self.mw_api.editPost(post_id,
+            self.username, self.password, post_struct)
 
     delete_post = lambda self, post_id: self.mw_api.deletePost('', post_id, self.username,
             self.password, '') 
@@ -198,165 +206,6 @@ class wp_xmlrpc(object):
             self.username, self.password, page_id) 
 
     get_page_list = lambda self: self.wp_api.getPageList('', self.username, self.password) 
-
-
-class PostFormatter(object):
-    MORE_KEY = "mt_text_more"
-    META_TEMPLATE = \
-""""%(bg)s
-"StrID : %(strid)s
-"Title : %(title)s
-"Slug  : %(slug)s
-"Cats  : %(cats)s
-"Tags  : %(tags)s
-"%(mid)s
-"EditType   : %(edittype)s
-"EditFormat : %(editformat)s
-"%(ed)s"""
-    POST_BEGIN = 0
-    
-    def __init__(self, content_struct):
-        self.content_struct = content_struct
-        self.buffer_meta = content_struct.buffer_meta
-        self.post_struct_meta = content_struct.post_struct_meta
-        content_struct.META_TEMPLATE = self.META_TEMPLATE
-        content_struct.MORE_KEY = self.MORE_KEY
-
-        if len(self.post_struct_meta)== 0:
-            self.post_struct_meta.update(title = '',
-                    wp_slug = '',
-                    post_type = '',
-                    description = '',
-                    custom_fields = [],
-                    post_status = 'draft')
-
-        self.POST_BEGIN = len(self.META_TEMPLATE.split('\n'))
-
-    def _get_content_from_struct(self, meta):
-        data = self.post_struct_meta
-        content = data["description"]
-
-         #detect more text
-        post_more = data.get(self.MORE_KEY, '')
-        if len(post_more) > 0:
-            content += u'<!--more-->' + post_more
-            data[self.MORE_KEY] = ''
-            data["description"] = content
-
-         #Use Markdown text if exists in custom fields
-        for field in data["custom_fields"]:
-            if field["key"] == g_data.CUSTOM_FIELD_KEY:
-                meta['editformat'] = "Markdown"
-                content = field["value"].encode('utf-8')
-                break
-
-        return content
-
-    @staticmethod
-    def _set_content_to_struct(buffer_meta, post_struct_meta):
-        struct = post_struct_meta
-        rawtext = buffer_meta["content"]
-
-        #Translate markdown and save in custom fields.
-        if buffer_meta["editformat"].lower() == "markdown":
-            struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
-            updated = False
-            for f in struct["custom_fields"]:
-                if f["key"] == g_data.CUSTOM_FIELD_KEY:
-                    f["value"] = rawtext
-                    updated = True
-                    break
-            if not updated:
-                field = dict(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)
-                struct["custom_fields"].append(field)
-                if buffer_meta["strid"] != '':
-                    field["id"] = buffer_meta["strid"] 
-        else:
-            struct["description"] = rawtext
-
-    def update_buffer_meta(self):
-        data = self.post_struct_meta
-        meta = dict(\
-                strid = str(data["postid"]), 
-                title = data["title"].encode("utf-8"), 
-                slug = data["wp_slug"].encode("utf-8"))
-        meta["cats"] = ", ".join(data["categories"]).encode("utf-8") 
-        meta["tags"] = ", ".join(data["mt_keywords"]).encode("utf-8")
-        meta['editformat'] = "HTML"
-        meta['edittype'] = "post"
-        meta["content"] = self._get_content_from_struct(meta)
-        self.buffer_meta.update(meta)
-
-    def update_post_struct(self):
-        meta = self.buffer_meta
-        self.post_struct_meta.update(title = meta["title"],
-                wp_slug = meta["slug"],
-                post_type = "post",
-                categories = meta["cats"].split(','), 
-                mt_keywords = meta["tags"].split(','))
-
-        self._set_content_to_struct(meta, self.post_struct_meta)
-
-    def update_content_by_id(self, id):
-        self.content_struct.post_struct = g_data.xmlrpc.get_post(id)
-
-    def save_post(self):
-        ps = self.post_struct_meta
-        if ps.get("postid", '') == '':
-            id = g_data.xmlrpc.new_post(ps)
-            self.update_content_by_id(id)
-        else:
-            id = ps["postid"] 
-            g_data.xmlrpc.edit_post(id, ps)
-
-    id = property(lambda self:self.post_struct_meta.get("postid", ""))
-
-
-class PageFormatter(PostFormatter):
-    MORE_KEY = "text_more"
-    META_TEMPLATE = \
-""""%(bg)s
-"StrID : %(strid)s
-"Title : %(title)s
-"Slug  : %(slug)s
-"%(mid)s
-"EditType   : %(edittype)s
-"EditFormat : %(editformat)s
-"%(ed)s"""
-
-    def __init__(self, content_struct):
-        super(PageFormatter, self).__init__(content_struct)
-
-    def update_buffer_meta(self):
-        data = self.post_struct_meta
-        meta = dict(\
-                strid = str(data["page_id"]), 
-                title = data["title"].encode("utf-8"), 
-                slug = data["wp_slug"].encode("utf-8"))
-        meta['editformat'] = "HTML"
-        meta['edittype'] = "page"
-        meta["content"] = self._get_content_from_struct(meta)
-        self.buffer_meta.update(meta)
-
-    def update_post_struct(self):
-        meta = self.buffer_meta
-        self.post_struct_meta.update(title = meta["title"],
-                wp_slug = meta["slug"],
-                post_type = "page")
-
-    def update_content_by_id(self, id):
-        self.content_struct.post_struct = g_data.xmlrpc.get_page(id)
-
-    def save_post(self):
-        ps = self.post_struct_meta
-        if ps.get("page_id", '') == '':
-            id = g_data.xmlrpc.new_post(ps)
-            self.update_content_by_id(id)
-        else:
-            id = ps["page_id"] 
-            g_data.xmlrpc.edit_post(id, ps)
-
-    id = property(lambda self:self.post_struct_meta.get("page_id", ""))
 
 class ContentStruct(object):
 
@@ -383,19 +232,22 @@ class ContentStruct(object):
 "EditFormat : %(editformat)s
 "%(ed)s""")
 
-    POST_BEGIN = property(lambda self:len(self.META_TEMPLATE[self.EDIT_TYPE].split('\n')))
+    POST_BEGIN = property(lambda self:len(self.META_TEMP[self.EDIT_TYPE].split('\n')))
 
-    def __init__(self, edit_type = None):
+    def __init__(self, edit_type = None, post_id = None):
 
         assert edit_type in ("post", "page"), "Type Error, " + edit_type
         self.EDIT_TYPE = edit_type
-        self.buffer_meta = dict(strid = '')
+        self.buffer_meta = dict(strid = '', edittype = edit_type)
         self.post_struct_meta = dict(title = '',
                 wp_slug = '',
                 post_type = edit_type,
                 description = '',
                 custom_fields = [],
                 post_status = 'draft')
+
+        if post_id is not None:
+            self.update_from_post_id(post_id)
 
 
     def parse_buffer(self):
@@ -458,7 +310,7 @@ class ContentStruct(object):
 
         struct.update(title = meta["title"],
                 wp_slug = meta["slug"],
-                post_type = "post")
+                post_type = self.EDIT_TYPE)
 
         if self.EDIT_TYPE == "post":
             struct.update(categories = meta["cats"].split(','), 
@@ -483,12 +335,9 @@ class ContentStruct(object):
         else:
             struct["description"] = rawtext
 
-    def update_from_post_id(self, id, force_update_cache = False):
-        if (not force_update_cache) and id in g_data.post_cache:
-            self.post_struct_meta = struct = g_data.post_cache[id]
-        else:
-            self.post_struct_meta = struct = getattr(g_data.xmlrpc, "get_" + self.EDIT_TYPE)(id)
-            g_data.post_cache[id] = struct
+    def update_from_post_id(self, post_id):
+
+        self.post_struct_meta = struct = getattr(g_data.xmlrpc, "get_" + self.EDIT_TYPE)(post_id)
 
         meta = dict( editformat = "HTML",
                 title = struct["title"].encode("utf-8"), 
@@ -526,45 +375,28 @@ class ContentStruct(object):
     def save_post(self):
         ps = self.post_struct_meta
         if self.EDIT_TYPE == "post":
-            if ps.get("postid", '') == '':
-                id = g_data.xmlrpc.new_post(ps)
+            if ps.get("postid", '') == '': 
+                post_id = g_data.xmlrpc.new_post(ps)
             else:
-                id = ps["postid"] 
-                g_data.xmlrpc.edit_post(id, ps)
+                post_id = ps["postid"] 
+                g_data.xmlrpc.edit_post(post_id, ps)
         else:
-            if ps.get("page_id", '') == '':
-                id = g_data.xmlrpc.new_post(ps)
+            if ps.get("page_id", '') == '': 
+                post_id = g_data.xmlrpc.new_post(ps)
             else:
-                id = ps["page_id"] 
-                g_data.xmlrpc.edit_post(id, ps)
+                post_id = ps["page_id"] 
+                g_data.xmlrpc.edit_post(post_id, ps)
 
-        self.update_from_post_id(id)
+        self.update_from_post_id(post_id)
 
-    post_status = property(lambda self:self.post_struct_meta["post_status"])
+    post_status = property(lambda self:self.post_struct_meta[self.EDIT_TYPE + "_status"])
 
     @post_status.setter
     def post_status(self, data):
         if data is not None:
-            self.post_struct_meta.update(post_status = data)
+            self.post_struct_meta[self.EDIT_TYPE + "_status"] = data
 
-    id = property(lambda self: self.buffer_meta["strid"])
-
-#    @property
-#    def post_struct(self):
-#        return self.post_struct_meta
-#
-#    @post_struct.setter
-#    def post_struct(self, data):
-#        assert self.EDIT_TYPE != '', "Set edit_type first."
-#        post_struct = self.post_struct
-#        post_struct.update(data)
-#        self.formatter.update_buffer_meta()
-#
-#    update_content_by_id = lambda self, id: self.formatter.update_content_by_id(id)
-#
-#    post_status = property(lambda self:self.post_struct_meta["post_status"], lambda self, d:self.post_struct_meta.update(post_status = d))
-#
-#    id = property(lambda self: self.formatter.id)
+    post_id = property(lambda self: self.buffer_meta["strid"])
 
 #################################################
 # Golbal Variables
@@ -785,7 +617,7 @@ def blog_save(pub = None):
     cp.post_status = pub
     cp.save_post()
     cp.update_buffer_meta()
-    notify = "%s ID=%s saved with status '%s'" % (cp.post_status, cp.id, cp.post_status)
+    notify = "%s ID=%s saved with status '%s'" % (cp.post_status, cp.post_id, cp.post_status)
     sys.stdout.write(notify)
     vim.command('setl nomodified')
 
@@ -801,7 +633,8 @@ def blog_new(edit_type = "post", currentContent = None):
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
     blog_wise_open_view()
-    g_data.current_post = cp = ContentStruct(edit_type)
+    g_data.current_post = ContentStruct(edit_type = edit_type)
+    cp = g_data.current_post 
     cp.fill_buffer()
 
 @view_switch(view = "edit")
@@ -814,9 +647,8 @@ def blog_edit(edit_type, post_id):
     blog_wise_open_view()
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
-    g_data.current_post = cp = ContentStruct(edit_type)
-    cp.update_content_by_id(post_id)
-    cp.fill_post_meta_area()
+    cp = g_data.cached_post_by_id(post_id)
+    cp.fill_buffer()
 
     vim.current.window.cursor = (cp.POST_BEGIN, 0)
     vim.command('setl nomodified')
