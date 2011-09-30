@@ -55,8 +55,6 @@ class DataObject(object):
 
     view = 'edit'
     vimpress_temp_dir = ''
-#    current_post = None
-
 
     blog_username = property(lambda self: self.xmlrpc.username)
     blog_url = property(lambda self: self.xmlrpc.blog_url)
@@ -67,24 +65,26 @@ class DataObject(object):
 
     @property
     def current_post(self):
-        if '' not in self.post_cache:
-            self.post_cache[''] = ContentStruct(edit_type = 'post')
         return self.post_cache.get(self.__current_post_id)
 
     @current_post.setter
     def current_post(self, data):
-        post_id = data.post_id
+        post_id = str(data.post_id)
         if post_id != '' and '' in self.post_cache:
             del self.post_cache['']
         self.__current_post_id = post_id
         if not self.post_cache.has_key(post_id):
             self.post_cache[post_id] = data
 
-    def cached_post_by_id(self, post_id):
+    def cached_post_by_id(self, post_id, edit_type = "post"):
+        print self.post_cache
+        post_id = str(post_id)
         if self.post_cache.has_key(post_id):
+            print "key hit" + str(type(post_id)) + str(post_id)
             p = self.post_cache[post_id]
         else:
-            self.current_post = p = ContentStruct(edit_type = "post", post_id = post_id)
+            print "key miss" + str(type(post_id)) + str(post_id)
+            self.current_post = p = ContentStruct(edit_type = edit_type, post_id = post_id)
         return p
 
     @conf_index.setter
@@ -647,7 +647,7 @@ def blog_edit(edit_type, post_id):
     blog_wise_open_view()
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
-    cp = g_data.cached_post_by_id(post_id)
+    cp = g_data.cached_post_by_id(post_id, edit_type = edit_type)
     cp.fill_buffer()
 
     vim.current.window.cursor = (cp.POST_BEGIN, 0)
