@@ -320,18 +320,18 @@ class ContentStruct(object):
 
         #Translate markdown and save in custom fields.
         if meta["editformat"].lower() == "markdown":
-            struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
-            updated = False
             for f in struct["custom_fields"]:
                 if f["key"] == g_data.CUSTOM_FIELD_KEY:
                     f["value"] = rawtext
-                    updated = True
                     break
-            if not updated:
+             # Not found, add new custom field.
+            else:
                 field = dict(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)
-                struct["custom_fields"].append(field)
                 if meta["strid"] != '':
                     field["id"] = meta["strid"] 
+                struct["custom_fields"].append(field)
+
+            struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
         else:
             struct["description"] = rawtext
 
