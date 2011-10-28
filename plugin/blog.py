@@ -234,6 +234,9 @@ class ContentStruct(object):
 
     POST_BEGIN = property(lambda self:len(self.META_TEMP[self.EDIT_TYPE].split('\n')))
 
+    raw_text = ''
+    html_text = ''
+
     def __init__(self, edit_type = None, post_id = None):
 
         assert edit_type in ("post", "page"), "Type Error, " + edit_type
@@ -247,7 +250,7 @@ class ContentStruct(object):
                 post_status = 'draft')
 
         if post_id is not None:
-            self.update_from_post_id(post_id)
+            self.refresh_from_wp(post_id)
 
 
     def parse_buffer(self):
@@ -302,7 +305,7 @@ class ContentStruct(object):
                     vim.current.buffer[end] = new_line.encode('utf-8')
             end += 1
 
-    def update_from_buffer(self):
+    def refresh_from_buffer(self):
         self.parse_buffer()
 
         meta = self.buffer_meta
@@ -316,7 +319,7 @@ class ContentStruct(object):
             struct.update(categories = meta["cats"].split(','), 
                 mt_keywords = meta["tags"].split(','))
 
-        rawtext = meta["content"]
+        self.rawtext = rawtext = meta["content"]
 
         #Translate markdown and save in custom fields.
         if meta["editformat"].lower() == "markdown":
@@ -331,14 +334,16 @@ class ContentStruct(object):
                     field["id"] = meta["strid"] 
                 struct["custom_fields"].append(field)
 
-            struct["description"] = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
+            struct["description"] = self.html_text = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
         else:
-            struct["description"] = rawtext
+            struct["description"] = self.html_text = rawtext
 
-    def update_from_post_id(self, post_id):
+    def refresh_from_wp(self, post_id):
 
+         # get from wp
         self.post_struct_meta = struct = getattr(g_data.xmlrpc, "get_" + self.EDIT_TYPE)(post_id)
 
+         # struct buffer meta
         meta = dict( editformat = "HTML",
                 title = struct["title"].encode("utf-8"), 
                 slug = struct["wp_slug"].encode("utf-8"))
@@ -352,22 +357,23 @@ class ContentStruct(object):
             meta.update(strid = str(struct["page_id"]))
             MORE_KEY = "text_more"
 
-        content = struct["description"]
+        self.html_text = content = struct["description"]
 
          #detect more text
         post_more = struct.get(MORE_KEY, '')
         if len(post_more) > 0:
             content += u'<!--more-->' + post_more
             struct[MORE_KEY] = ''
-            struct["description"] = content
+            self.html_text = struct["description"] = content
 
          #Use Markdown text if exists in custom fields
         for field in struct["custom_fields"]:
             if field["key"] == g_data.CUSTOM_FIELD_KEY:
                 meta['editformat'] = "Markdown"
-                content = field["value"].encode('utf-8')
+                self.raw_text = content = field["value"].encode('utf-8')
                 break
-
+        else:
+            self.raw_text = content
         meta["content"] = content
 
         self.buffer_meta.update(meta)
@@ -387,7 +393,7 @@ class ContentStruct(object):
                 post_id = ps["page_id"] 
                 g_data.xmlrpc.edit_post(post_id, ps)
 
-        self.update_from_post_id(post_id)
+        self.refresh_from_wp(post_id)
 
     post_status = property(lambda self:self.post_struct_meta[self.EDIT_TYPE + "_status"])
 
@@ -397,6 +403,33 @@ class ContentStruct(object):
             self.post_struct_meta[self.EDIT_TYPE + "_status"] = data
 
     post_id = property(lambda self: self.buffer_meta["strid"])
+
+    def html_preview(self):
+        """
+        Opens a browser with a local preview of the content.
+        @params text_html - the html content
+                meta      - a dictionary of the meta data
+        """
+        if g_data.vimpress_temp_dir == '':
+            g_data.vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
+        
+        html = \
+"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Vimpress Local Preview: %(title)s</title>
+<style type="text/css"> ul, li { margin: 1em; } :link,:visited { text-decoration:none } h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; } a img,:link img,:visited img { border:none } body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
+</style>
+</meta>
+</head>
+<body> 
+%(content)s 
+</body>
+</html>
+""" % dict(content = self.html_text, title = self.buffer_meta["title"])
+        with open(os.path.join(g_data.vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
+            f.write(html)
+        webbrowser.open("file://%s" % f.name)
 
 #################################################
 # Golbal Variables
@@ -467,87 +500,6 @@ def view_switch(view = "", assert_view = "", reset = False):
         return __run
     return switch
 
-
-def blog_meta_parse():
-    """
-    Parses the meta data region of a blog editing buffer.
-    @returns a dictionary of the meta data
-    """
-    meta = dict()
-    start = 0
-    while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
-        start +=1
-
-    end = start + 1
-    while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
-        if not vim.current.buffer[end].startswith('"===='):
-            line = vim.current.buffer[end][1:].strip().split(":")
-            k, v = line[0].strip().lower(), ':'.join(line[1:])
-            meta[k.strip().lower()] = v.strip()
-        end += 1
-
-    meta["post_begin"] = end + 1
-    return meta
-
-def blog_meta_area_update(**kw):
-    """
-    Updates the meta data region of a blog editing buffer.
-    @params **kwargs - keyworded arguments
-    """
-    start = 0
-    while not vim.current.buffer[start][1:].startswith(g_data.MARKER['bg']):
-        start +=1
-
-    end = start + 1
-    while not vim.current.buffer[end][1:].startswith(g_data.MARKER['ed']):
-        if not vim.current.buffer[end].startswith('"===='):
-            line = vim.current.buffer[end][1:].strip().split(":")
-            k, v = line[0].strip().lower(), ':'.join(line[1:])
-            if k in kw:
-                new_line = "\"%s: %s" % (line[0], kw[k])
-                vim.current.buffer[end] = new_line
-        end += 1
-
-def blog_fill_meta_area(meta):
-    """
-    Creates the meta data region for a blog editing buffer using a dictionary of meta data. Empty keywords
-    are replaced by default values from the default_meta variable.
-    @params meta - a dictionary of meta data
-    """
-    for k in g_data.DEFAULT_META.keys():
-        if k not in meta:
-            meta[k] = g_data.DEFAULT_META[k]
-
-    meta.update(g_data.MARKER)
-    template = dict( \
-        post = \
-""""%(bg)s
-"StrID : %(strid)s
-"Title : %(title)s
-"Slug  : %(slug)s
-"Cats  : %(cats)s
-"Tags  : %(tags)s
-"%(mid)s
-"EditType   : %(edittype)s
-"EditFormat : %(editformat)s
-"%(ed)s""", 
-        page = \
-""""%(bg)s
-"StrID : %(strid)s
-"Title : %(title)s
-"Slug  : %(slug)s
-"%(mid)s
-"EditType   : %(edittype)s
-"EditFormat : %(editformat)s
-"%(ed)s""") 
-
-    if meta["edittype"] not in ("post", "page"):
-        raise VimPressException("Invalid option: %(edittype)s " % meta)
-    meta_text = template[meta["edittype"].lower()] % meta
-    meta = meta_text.split('\n')
-    vim.current.buffer[0] = meta[0]
-    vim.current.buffer.append(meta[1:])
-
 def blog_wise_open_view():
     """
     Wisely decides whether to wipe out the content of current buffer or open a new splited window.
@@ -570,32 +522,6 @@ def vim_input(message = 'input', secret = False):
     vim.command('call inputrestore()')
     return vim.eval('user_input')
 
-def html_preview(text_html, meta):
-    """
-    Opens a browser with a local preview of the content.
-    @params text_html - the html content
-            meta      - a dictionary of the meta data
-    """
-    if g_data.vimpress_temp_dir == '':
-        g_data.vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
-    
-    html = \
-"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html><head>
-<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>Vimpress Local Preview: %(title)s</title>
-<style type="text/css"> ul, li { margin: 1em; } :link,:visited { text-decoration:none } h1,h2,h3,h4,h5,h6,pre,code { font-size:1em; } a img,:link img,:visited img { border:none } body { margin:0 auto; width:770px; font-family: Helvetica, Arial, Sans-serif; font-size:12px; color:#444; }
-</style>
-</meta>
-</head>
-<body> 
-%(content)s 
-</body>
-</html>
-""" % dict(content = text_html, title = meta["title"])
-    with open(os.path.join(g_data.vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
-        f.write(html)
-    webbrowser.open("file://%s" % f.name)
 
 
 #################################################
@@ -613,7 +539,7 @@ def blog_save(pub = None):
     if pub not in ("publish", "draft", None):
         raise VimPressException(":BlogSave draft|publish")
     cp = g_data.current_post
-    cp.update_from_buffer()
+    cp.refresh_from_buffer()
     cp.post_status = pub
     cp.save_post()
     cp.update_buffer_meta()
@@ -818,17 +744,16 @@ def blog_preview(pub = "local"):
                   If "draft", the content is saved as a draft and previewed remotely.
                   If "publish", the content is published and displayed remotely.
     """
-    meta = blog_meta_parse()
-    rawtext = '\n'.join(vim.current.buffer[meta["post_begin"]:])
 
+    cp = g_data.current_post
+    cp.refresh_from_buffer()
+    meta = cp.buffer_meta
     if pub == "local":
-        if meta["editformat"].strip().lower() == "markdown":
-            html = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
-            html_preview(html, meta)
-        else:
-            html_preview(rawtext, meta)
+        cp.html_preview()
+
     elif pub in ("publish", "draft"):
-        meta = blog_save(pub)
+        cp.post_status = pub
+        cp.save_post()
         webbrowser.open("%s?p=%s&preview=true" % (g_data.blog_url, meta["strid"]))
         if pub == "draft":
             sys.stdout.write("\nYou have to login in the browser to preview the post when save as draft.")
