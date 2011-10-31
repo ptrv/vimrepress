@@ -19,9 +19,14 @@ def exception_check(func):
         except (VimPressException, AssertionError), e:
             sys.stderr.write(str(e))
         except (xmlrpclib.Fault, xmlrpclib.ProtocolError), e:
-            sys.stderr.write("xmlrpc error: %s" % e.faultString.encode("utf-8"))
+            if getattr(e, "faultString", None) is None:
+                sys.stderr.write("xmlrpc error: %s" % e)
+            else:
+                sys.stderr.write("xmlrpc error: %s" % e.faultString.encode("utf-8"))
         except IOError, e:
             sys.stderr.write("network error: %s" % e)
+        except Exception, e:
+            sys.stderr.write("something wrong: %s" % e)
 
     return __check
 
@@ -61,7 +66,8 @@ class DataObject(object):
     conf_index = property(lambda self:self.__conf_index)
 
     __current_post_id = ''
-    post_cache = dict()
+
+    post_cache = property(lambda self: self.xmlrpc.post_cache) 
 
     @property
     def current_post(self):
@@ -163,6 +169,7 @@ class wp_xmlrpc(object):
         self.cache_reset()
 
     def cache_reset(self):
+        self.post_cache = dict()
         self.__cache_post_titles = []
         self.__post_title_max = False
 
@@ -351,7 +358,7 @@ class ContentStruct(object):
         if self.EDIT_TYPE == "post":
             meta.update(strid = str(struct["postid"]),
             cats = ", ".join(struct["categories"]).encode("utf-8") ,
-            tags = ", ".join(struct["mt_keywords"]).encode("utf-8"))
+            tags = struct["mt_keywords"].encode("utf-8"))
             MORE_KEY = "mt_text_more"
         else:
             meta.update(strid = str(struct["page_id"]))
@@ -750,7 +757,6 @@ def blog_preview(pub = "local"):
     meta = cp.buffer_meta
     if pub == "local":
         cp.html_preview()
-
     elif pub in ("publish", "draft"):
         cp.post_status = pub
         cp.save_post()
