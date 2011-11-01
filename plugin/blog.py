@@ -27,6 +27,8 @@ def exception_check(func):
             sys.stderr.write("network error: %s" % e)
         except Exception, e:
             sys.stderr.write("something wrong: %s" % e)
+            raise
+
 
     return __check
 
@@ -71,16 +73,21 @@ class DataObject(object):
 
     @property
     def current_post(self):
-        return self.post_cache.get(self.__current_post_id)
+        post_id = self.__current_post_id
+        post = self.post_cache.get(post_id)
+        if post is None and post_id == '':
+            post = self.post_cache[post_id] = ContentStruct()
+
+        return post
 
     @current_post.setter
     def current_post(self, data):
         post_id = str(data.post_id)
-        if post_id != '' and '' in self.post_cache:
-            del self.post_cache['']
+#        if post_id != '' and '' in self.post_cache:
+#            del self.post_cache['']
         self.__current_post_id = post_id
-        if not self.post_cache.has_key(post_id):
-            self.post_cache[post_id] = data
+        self.post_cache[post_id] = data
+#        if not self.post_cache.has_key(post_id):
 
     def cached_post_by_id(self, post_id, edit_type = "post"):
         print self.post_cache
@@ -246,7 +253,7 @@ class ContentStruct(object):
 
     def __init__(self, edit_type = None, post_id = None):
 
-        assert edit_type in ("post", "page"), "Type Error, " + edit_type
+        #assert edit_type in ("post", "page"), "Type Error, " + str(edit_type)
         self.EDIT_TYPE = edit_type
         self.buffer_meta = dict(strid = '', edittype = edit_type)
         self.post_struct_meta = dict(title = '',
@@ -286,7 +293,16 @@ class ContentStruct(object):
                 meta[k] = g_data.DEFAULT_META[k]
         meta.update(g_data.MARKER)
 
-        meta_text = (meta_temp % meta).split('\n')
+        buf_text = meta_temp % meta
+        buf_list = buf_text.split("\n")
+        #meta_text = (meta_temp % meta).split('\n')
+         #BUG Work Aroud: Why became unicode?
+         # repeat: BlogNew, BlogSave, BlogList and open the save post
+        if type(buf_list[0]) is unicode:
+            meta_text = [i.encode('utf-8') for i in buf_list]
+        else:
+            meta_text = buf_list
+        print meta_text
         vim.current.buffer[0] = meta_text[0]
         vim.current.buffer.append(meta_text[1:])
         content = self.buffer_meta.get("content", '')
@@ -546,10 +562,14 @@ def blog_save(pub = None):
     if pub not in ("publish", "draft", None):
         raise VimPressException(":BlogSave draft|publish")
     cp = g_data.current_post
+    old_id = cp.buffer_meta['strid']
     cp.refresh_from_buffer()
     cp.post_status = pub
     cp.save_post()
     cp.update_buffer_meta()
+    g_data.current_post = cp
+    if old_id == '' and cp.buffer_meta['strid'] != '':
+        g_data.post_cache.pop('')
     notify = "%s ID=%s saved with status '%s'" % (cp.post_status, cp.post_id, cp.post_status)
     sys.stdout.write(notify)
     vim.command('setl nomodified')
