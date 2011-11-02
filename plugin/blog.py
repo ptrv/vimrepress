@@ -66,9 +66,7 @@ class DataObject(object):
     blog_username = property(lambda self: self.xmlrpc.username)
     blog_url = property(lambda self: self.xmlrpc.blog_url)
     conf_index = property(lambda self:self.__conf_index)
-
-    current_post_id = ''
-
+    current_post_id = property(lambda self:self.xmlrpc.current_post_id, lambda self, d: setattr(self.xmlrpc, "current_post_id", d))
     post_cache = property(lambda self: self.xmlrpc.post_cache) 
 
     @property
@@ -172,6 +170,8 @@ class wp_xmlrpc(object):
 
         self.cache_reset()
         self.post_cache = dict()
+
+        self.current_post_id = ''
 
     def cache_reset(self):
         self.__cache_post_titles = []
