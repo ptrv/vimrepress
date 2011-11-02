@@ -67,29 +67,38 @@ class DataObject(object):
     blog_url = property(lambda self: self.xmlrpc.blog_url)
     conf_index = property(lambda self:self.__conf_index)
 
-    __current_post_id = ''
+    current_post_id = ''
 
     post_cache = property(lambda self: self.xmlrpc.post_cache) 
 
     @property
     def current_post(self):
-        post_id = self.__current_post_id
+        post_id = self.current_post_id
         post = self.post_cache.get(post_id)
         if post is None and post_id == '':
-            post = self.post_cache[post_id] = ContentStruct()
+            post = ContentStruct()
+            if post.post_id != '':
+                self.current_post_id = post.post_id
+                self.current_post = post
+            else:
+                self.post_cache[''] = post
 
+        assert post is not None, "current_post, no way to return None"
         return post
 
     @current_post.setter
     def current_post(self, data):
         post_id = str(data.post_id)
-        if post_id != '' and '' in self.post_cache and self.__current_post_id == '':
+
+         # New post, just post first time
+        if self.current_post_id == '' and post_id != '' and self.post_cache.has_key(''):
             self.post_cache.pop('')
-        self.__current_post_id = post_id
+
+        self.current_post_id = post_id
         self.post_cache[post_id] = data
 
     def cached_post_by_id(self, post_id, edit_type = "post"):
-        print self.post_cache
+        print self.post_cache.keys()
         post_id = str(post_id)
         if self.post_cache.has_key(post_id):
             print "key hit" + str(type(post_id)) + str(post_id)
@@ -173,9 +182,9 @@ class wp_xmlrpc(object):
                 (username, blog_url)
 
         self.cache_reset()
+        self.post_cache = dict()
 
     def cache_reset(self):
-        self.post_cache = dict()
         self.__cache_post_titles = []
         self.__post_title_max = False
 
@@ -343,13 +352,13 @@ u""""%(bg)s
              # Not found, add new custom field.
             else:
                 field = dict(key = g_data.CUSTOM_FIELD_KEY, value = rawtext)
-                if meta["strid"] != '':
-                    field["id"] = meta["strid"] 
                 struct["custom_fields"].append(field)
 
             struct["description"] = self.html_text = markdown.markdown(rawtext)
         else:
             struct["description"] = self.html_text = rawtext
+
+
 
     def refresh_from_wp(self, post_id):
 
@@ -395,16 +404,16 @@ u""""%(bg)s
     def save_post(self):
         ps = self.post_struct_meta
         if self.EDIT_TYPE == "post":
-            if ps.get("postid", '') == '': 
+            if ps.get("postid", '') == '' and self.post_id == '': 
                 post_id = g_data.xmlrpc.new_post(ps)
             else:
-                post_id = ps["postid"] 
+                post_id = ps["postid"] if ps.has_key("postid") else int(self.post_id)
                 g_data.xmlrpc.edit_post(post_id, ps)
         else:
-            if ps.get("page_id", '') == '': 
+            if ps.get("page_id", '') == '' and self.post_id == '': 
                 post_id = g_data.xmlrpc.new_post(ps)
             else:
-                post_id = ps["page_id"] 
+                post_id = ps["page_id"] if ps.has_key("page_id") else int(self.post_id)
                 g_data.xmlrpc.edit_post(post_id, ps)
 
         self.refresh_from_wp(post_id)
@@ -769,7 +778,7 @@ def blog_preview(pub = "local"):
     elif pub in ("publish", "draft"):
         cp.post_status = pub
         cp.save_post()
-        webbrowser.open("%s?p=%s&preview=true" % (g_data.blog_url, meta["strid"]))
+        webbrowser.open("%s?p=%s&preview=true" % (g_data.blog_url, cp.post_id))
         if pub == "draft":
             sys.stdout.write("\nYou have to login in the browser to preview the post when save as draft.")
     else:
