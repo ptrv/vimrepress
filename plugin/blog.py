@@ -83,11 +83,10 @@ class DataObject(object):
     @current_post.setter
     def current_post(self, data):
         post_id = str(data.post_id)
-#        if post_id != '' and '' in self.post_cache:
-#            del self.post_cache['']
+        if post_id != '' and '' in self.post_cache and self.__current_post_id == '':
+            self.post_cache.pop('')
         self.__current_post_id = post_id
         self.post_cache[post_id] = data
-#        if not self.post_cache.has_key(post_id):
 
     def cached_post_by_id(self, post_id, edit_type = "post"):
         print self.post_cache
@@ -227,7 +226,7 @@ class ContentStruct(object):
     post_struct_meta = None
     EDIT_TYPE = ''
     META_TEMP = dict(post = \
-""""%(bg)s
+u""""%(bg)s
 "StrID : %(strid)s
 "Title : %(title)s
 "Slug  : %(slug)s
@@ -237,7 +236,7 @@ class ContentStruct(object):
 "EditType   : %(edittype)s
 "EditFormat : %(editformat)s
 "%(ed)s""", page = \
-""""%(bg)s
+u""""%(bg)s
 "StrID : %(strid)s
 "Title : %(title)s
 "Slug  : %(slug)s
@@ -246,14 +245,13 @@ class ContentStruct(object):
 "EditFormat : %(editformat)s
 "%(ed)s""")
 
-    POST_BEGIN = property(lambda self:len(self.META_TEMP[self.EDIT_TYPE].split('\n')))
+    POST_BEGIN = property(lambda self:len(self.META_TEMP[self.EDIT_TYPE].splitlines()))
 
     raw_text = ''
     html_text = ''
 
     def __init__(self, edit_type = None, post_id = None):
 
-        #assert edit_type in ("post", "page"), "Type Error, " + str(edit_type)
         self.EDIT_TYPE = edit_type
         self.buffer_meta = dict(strid = '', edittype = edit_type)
         self.post_struct_meta = dict(title = '',
@@ -266,6 +264,8 @@ class ContentStruct(object):
         if post_id is not None:
             self.refresh_from_wp(post_id)
 
+        if self.EDIT_TYPE is None:
+            self.parse_buffer()
 
     def parse_buffer(self):
         start = 0
@@ -292,21 +292,11 @@ class ContentStruct(object):
             if k not in meta:
                 meta[k] = g_data.DEFAULT_META[k]
         meta.update(g_data.MARKER)
-
-        buf_text = meta_temp % meta
-        buf_list = buf_text.split("\n")
-        #meta_text = (meta_temp % meta).split('\n')
-         #BUG Work Aroud: Why became unicode?
-         # repeat: BlogNew, BlogSave, BlogList and open the save post
-        if type(buf_list[0]) is unicode:
-            meta_text = [i.encode('utf-8') for i in buf_list]
-        else:
-            meta_text = buf_list
-        print meta_text
+        meta_text = (meta_temp % meta).encode('utf-8').splitlines()
         vim.current.buffer[0] = meta_text[0]
         vim.current.buffer.append(meta_text[1:])
-        content = self.buffer_meta.get("content", '')
-        vim.current.buffer.append(content.split('\n'))
+        content = self.buffer_meta.get("content", ' ').encode('utf-8').splitlines()
+        vim.current.buffer.append(content)
 
     def update_buffer_meta(self):
         """
@@ -324,7 +314,7 @@ class ContentStruct(object):
                 line = vim.current.buffer[end][1:].strip().split(":")
                 k, v = line[0].strip().lower(), ':'.join(line[1:])
                 if k in kw:
-                    new_line = "\"%s: %s" % (line[0], kw[k])
+                    new_line = u"\"%s: %s" % (line[0], kw[k])
                     vim.current.buffer[end] = new_line.encode('utf-8')
             end += 1
 
@@ -357,7 +347,7 @@ class ContentStruct(object):
                     field["id"] = meta["strid"] 
                 struct["custom_fields"].append(field)
 
-            struct["description"] = self.html_text = markdown.markdown(rawtext.decode('utf-8')).encode('utf-8')
+            struct["description"] = self.html_text = markdown.markdown(rawtext)
         else:
             struct["description"] = self.html_text = rawtext
 
@@ -368,13 +358,13 @@ class ContentStruct(object):
 
          # struct buffer meta
         meta = dict( editformat = "HTML",
-                title = struct["title"].encode("utf-8"), 
-                slug = struct["wp_slug"].encode("utf-8"))
+                title = struct["title"], 
+                slug = struct["wp_slug"])
 
         if self.EDIT_TYPE == "post":
             meta.update(strid = str(struct["postid"]),
-            cats = ", ".join(struct["categories"]).encode("utf-8") ,
-            tags = struct["mt_keywords"].encode("utf-8"))
+            cats = ", ".join(struct["categories"]),
+            tags = struct["mt_keywords"])
             MORE_KEY = "mt_text_more"
         else:
             meta.update(strid = str(struct["page_id"]))
@@ -393,10 +383,11 @@ class ContentStruct(object):
         for field in struct["custom_fields"]:
             if field["key"] == g_data.CUSTOM_FIELD_KEY:
                 meta['editformat'] = "Markdown"
-                self.raw_text = content = field["value"].encode('utf-8')
+                self.raw_text = content = field["value"]
                 break
         else:
             self.raw_text = content
+
         meta["content"] = content
 
         self.buffer_meta.update(meta)
@@ -437,7 +428,7 @@ class ContentStruct(object):
             g_data.vimpress_temp_dir = tempfile.mkdtemp(suffix="vimpress")
         
         html = \
-"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+u"""<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html><head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <title>Vimpress Local Preview: %(title)s</title>
@@ -451,7 +442,7 @@ class ContentStruct(object):
 </html>
 """ % dict(content = self.html_text, title = self.buffer_meta["title"])
         with open(os.path.join(g_data.vimpress_temp_dir, "vimpress_temp.html"), 'w') as f:
-            f.write(html)
+            f.write(html.encode('utf-8'))
         webbrowser.open("file://%s" % f.name)
 
 #################################################
@@ -473,7 +464,7 @@ def vim_encoding_check(func):
         orig_enc = vim.eval("&encoding") 
         if orig_enc != "utf-8":
             modified = vim.eval("&modified")
-            buf_list = '\n'.join(vim.current.buffer).decode(orig_enc).encode('utf-8').split('\n')
+            buf_list = '\n'.join(vim.current.buffer).decode(orig_enc).encode('utf-8').splitlines()
             del vim.current.buffer[:]
             vim.command("setl encoding=utf-8")
             vim.current.buffer[0] = buf_list[0]
@@ -562,14 +553,12 @@ def blog_save(pub = None):
     if pub not in ("publish", "draft", None):
         raise VimPressException(":BlogSave draft|publish")
     cp = g_data.current_post
-    old_id = cp.buffer_meta['strid']
+    assert cp is not None, "Can't get current post obj."
     cp.refresh_from_buffer()
     cp.post_status = pub
     cp.save_post()
     cp.update_buffer_meta()
     g_data.current_post = cp
-    if old_id == '' and cp.buffer_meta['strid'] != '':
-        g_data.post_cache.pop('')
     notify = "%s ID=%s saved with status '%s'" % (cp.post_status, cp.post_id, cp.post_status)
     sys.stdout.write(notify)
     vim.command('setl nomodified')
@@ -678,11 +667,11 @@ def append_blog_list(edit_type, count = g_data.DEFAULT_LIST_COUNT):
         posts_titles = g_data.xmlrpc.get_recent_post_titles(retrive_count)
 
         vim.current.buffer.append(\
-                [(u"%(postid)s\t%(title)s" % p).encode('utf8') for p in posts_titles[current_posts:]])
+                [(u"%(postid)s\t%(title)s" % p).encode('utf-8') for p in posts_titles[current_posts:]])
     else:
         pages = g_data.xmlrpc.get_page_list()
         vim.current.buffer.append(\
-            [(u"%(page_id)s\t%(page_title)s" % p).encode('utf8') for p in pages])
+            [(u"%(page_id)s\t%(page_title)s" % p).encode('utf-8') for p in pages])
 
 @exception_check
 @vim_encoding_check
@@ -757,7 +746,7 @@ def blog_append_code(code_type = ""):
         code_type = (code_type, ' line="1"')
     html = html % code_type
     row, col = vim.current.window.cursor 
-    code_block = html.split('\n')
+    code_block = html.splitlines()
     vim.current.range.append(code_block)
     vim.current.window.cursor = (row + len(code_block), 0)
 
