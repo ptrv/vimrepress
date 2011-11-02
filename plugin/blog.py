@@ -93,20 +93,9 @@ class DataObject(object):
          # New post, just post first time
         if self.current_post_id == '' and post_id != '' and self.post_cache.has_key(''):
             self.post_cache.pop('')
-
         self.current_post_id = post_id
-        self.post_cache[post_id] = data
-
-    def cached_post_by_id(self, post_id, edit_type = "post"):
-        print self.post_cache.keys()
-        post_id = str(post_id)
-        if self.post_cache.has_key(post_id):
-            print "key hit" + str(type(post_id)) + str(post_id)
-            p = self.post_cache[post_id]
-        else:
-            print "key miss" + str(type(post_id)) + str(post_id)
-            self.current_post = p = ContentStruct(edit_type = edit_type, post_id = post_id)
-        return p
+        if not self.post_cache.has_key(post_id):
+            self.post_cache[post_id] = data
 
     @conf_index.setter
     def conf_index(self, index):
@@ -598,9 +587,14 @@ def blog_edit(edit_type, post_id):
     blog_wise_open_view()
     if edit_type.lower() not in ("post", "page"):
         raise VimPressException("Invalid option: %s " % edit_type)
-    cp = g_data.cached_post_by_id(post_id, edit_type = edit_type)
-    cp.fill_buffer()
+    post_id = str(post_id)
 
+    if g_data.post_cache.has_key(post_id):
+        cp = g_data.current_post = g_data.post_cache[post_id]
+    else:
+        cp = g_data.current_post = ContentStruct(edit_type = edit_type, post_id = post_id)
+
+    cp.fill_buffer()
     vim.current.window.cursor = (cp.POST_BEGIN, 0)
     vim.command('setl nomodified')
     vim.command('setl textwidth=0')
