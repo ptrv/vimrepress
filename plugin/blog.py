@@ -233,6 +233,7 @@ u""""%(bg)s
 "%(mid)s
 "EditType   : %(edittype)s
 "EditFormat : %(editformat)s
+"BlogAddr   : %(blogaddr)s
 "%(ed)s""", page = \
 u""""%(bg)s
 "StrID : %(strid)s
@@ -241,6 +242,7 @@ u""""%(bg)s
 "%(mid)s
 "EditType   : %(edittype)s
 "EditFormat : %(editformat)s
+"BlogAddr   : %(blogaddr)s
 "%(ed)s""")
 
     POST_BEGIN = property(lambda self:len(self.META_TEMP[self.EDIT_TYPE].splitlines()))
@@ -251,7 +253,7 @@ u""""%(bg)s
     def __init__(self, edit_type = None, post_id = None):
 
         self.EDIT_TYPE = edit_type
-        self.buffer_meta = dict(strid = '', edittype = edit_type)
+        self.buffer_meta = dict(strid = '', edittype = edit_type, blogaddr = g_data.blog_url)
         self.post_struct_meta = dict(title = '',
                 wp_slug = '',
                 post_type = edit_type,
@@ -553,6 +555,11 @@ def blog_save(pub = None):
     cp = g_data.current_post
     assert cp is not None, "Can't get current post obj."
     cp.refresh_from_buffer()
+
+    if cp.buffer_meta["blogaddr"] != g_data.blog_url and cp.post_id != '':
+        confirm = vim_input("Are u sure saving it to \"%s\" ? BlogAddr in current buffer does NOT matched. \nStill saving it ? (may cause data lost) [yes/NO]" % g_data.blog_url)
+        assert confirm.lower() == 'yes', "Aborted."
+
     cp.post_status = pub
     cp.save_post()
     cp.update_buffer_meta()
