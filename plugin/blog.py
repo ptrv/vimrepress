@@ -462,7 +462,9 @@ def vim_encoding_check(func):
     """
     def __check(*args, **kw):
         orig_enc = vim.eval("&encoding") 
-        if orig_enc != "utf-8":
+        if orig_enc is None:
+            sys.stdout.write("Failed to detech current vim encoding. Make sure your content encoded in UTF-8 to have vimpress work correctly.")
+        elif orig_enc != "utf-8":
             modified = vim.eval("&modified")
             buf_list = '\n'.join(vim.current.buffer).decode(orig_enc).encode('utf-8').splitlines()
             del vim.current.buffer[:]
